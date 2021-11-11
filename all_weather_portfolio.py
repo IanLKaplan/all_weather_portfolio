@@ -74,12 +74,18 @@ def calc_portfolio_holdings(initial_investment: int, weights: pd.DataFrame, pric
     :return: the dollar value of the share holdings and the number of shares
     """
     weights_np: np.array = np.zeros(weights.shape[1])
+    prices_np: np.array = np.zeros(weights.shape[1])
     for ix, col in enumerate(weights.columns):
         weights_np[ix] = weights[col]
+        prices_np[ix] = prices[col]
     budget_np = weights_np * float(initial_investment)
-    shares = budget_np // prices
-    holdings = shares * prices
-    return holdings, shares
+    shares = budget_np // prices_np
+    holdings = shares * prices_np
+    holdings_df: pd.DataFrame = pd.DataFrame(holdings).transpose()
+    holdings_df.columns = weights.columns
+    shares_df: pd.DataFrame = pd.DataFrame(shares).transpose()
+    shares_df.columns = weights.columns
+    return holdings_df, shares_df
 
 # initial investment, in dollars
 initial_investment = 10000
@@ -178,6 +184,7 @@ returns = return_df(etf_close)
 def calc_rebalanced_portfolio(holdings: pd.DataFrame,
                             etf_close: pd.DataFrame,
                             returns: pd.DataFrame,
+                            weights: pd.DataFrame,
                             rebalance_days: int) -> Tuple[pd.DataFrame, pd.DataFrame]:
     portfolio_np = np.zeros(etf_close.shape, dtype=np.float64)
     portfolio_total_np = np.zeros(etf_close.shape[0])
@@ -195,7 +202,7 @@ def calc_rebalanced_portfolio(holdings: pd.DataFrame,
             current_holdings.index = [date]
             close_prices_t = etf_close[t:t+1]
             portfolio_np[t, ] = portfolio_rebalance(cash_holdings=current_holdings,
-                                                    weights=weights_df,
+                                                    weights=weights,
                                                     portfolio_range=portfolio_range,
                                                     prices=close_prices_t)
     portfolio_df: pd.DataFrame = pd.DataFrame(portfolio_np, index=etf_close.index, columns=etf_close.columns)
@@ -206,7 +213,14 @@ def calc_rebalanced_portfolio(holdings: pd.DataFrame,
 portfolio_df, portfolio_total_df = calc_rebalanced_portfolio(holdings=holdings,
                                                              etf_close=etf_close,
                                                              returns=returns,
+                                                             weights=weights_df,
                                                              rebalance_days=days_in_quarter)
+
+portfolio_yearly_df, portfolio_total_yearly_df = calc_rebalanced_portfolio(holdings=holdings,
+                                                             etf_close=etf_close,
+                                                             returns=returns,
+                                                             weights=weights_df,
+                                                             rebalance_days=trading_days)
 
 portfolio_total_np = np.array(portfolio_total_df)
 portfolio_np = np.array(portfolio_df)
@@ -243,6 +257,29 @@ for i in range(1, market_portfolio_np.shape[0]):
 market_portfolio_df: pd.DataFrame = pd.DataFrame(market_portfolio_np, index=spy_adj_close.index, columns=[market])
 
 portfolios_df: pd.DataFrame = pd.concat([portfolio_total_df, market_portfolio_df], axis=1)
+
+forty_sixty_weights_df = pd.DataFrame([0.40, 0.30, 0.30]).transpose()
+forty_sixty_weights_df.columns = ['VTI', 'VGLT', 'VGIT']
+forty_sixty_holdings, forty_sixty_shares = calc_portfolio_holdings(initial_investment=initial_investment,
+                                           weights=forty_sixty_weights_df,
+                                           prices=prices)
+
+portfolio_forty_sixty_df, portfolio_total_forty_sixty_df = calc_rebalanced_portfolio(holdings=forty_sixty_holdings,
+                                                             etf_close=etf_close[forty_sixty_weights_df.columns],
+                                                             returns=returns[forty_sixty_weights_df.columns],
+                                                             weights=forty_sixty_weights_df,
+                                                             rebalance_days=trading_days)
+
+
+portfolio_yearly_return = return_df(portfolio_total_yearly_df)
+
+portfolio_yearly_sd = np.std( portfolio_yearly_return ) * np.sqrt(portfolio_yearly_return.shape[0])
+
+portfolio_sixty_forty_return = return_df(portfolio_total_forty_sixty_df)
+portfolio_sixty_forty_sd = np.std( portfolio_sixty_forty_return ) * np.sqrt(portfolio_sixty_forty_return.shape[0])
+
+sd_df = pd.DataFrame([portfolio_sixty_forty_sd, portfolio_yearly_sd]).transpose()
+print(tabulate(sd_df, headers=['stddev', '60/40', 'All Weather'], tablefmt='fancy_grid'))
 
 print("hi there")
 
