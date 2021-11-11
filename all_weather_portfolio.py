@@ -281,6 +281,22 @@ portfolio_sixty_forty_sd = np.std( portfolio_sixty_forty_return ) * np.sqrt(port
 sd_df = pd.DataFrame([portfolio_sixty_forty_sd, portfolio_yearly_sd]).transpose()
 print(tabulate(sd_df, headers=['stddev', '60/40', 'All Weather'], tablefmt='fancy_grid'))
 
+aom_adj_close_file = 'aom_adj_close'
+aom_adj_close: pd.DataFrame = get_market_data(file_name=aom_adj_close_file,
+                                          data_col="Adj Close",
+                                          symbols=['AOM'],
+                                          data_source=data_source,
+                                          start_date=start_date,
+                                          end_date=end_date)
+
+aom_returns = np.array(return_df(aom_adj_close))
+
+aom_total_np = np.zeros(aom_adj_close.shape[0], dtype=np.float64)
+aom_total_np[0] = initial_investment
+for t in range(1, aom_total_np.shape[0]):
+    aom_total_np[t] = aom_total_np[t-1] + (aom_total_np[t-1] * aom_returns[t-1])
+
+
 print("hi there")
 
 def main():
