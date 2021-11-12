@@ -314,6 +314,70 @@ def annual_return(portfolio_total_df: pd.DataFrame, trading_days: int) -> pd.Dat
 
 annual_ret_df = annual_return(portfolio_total_forty_sixty_df, trading_days)
 
+risk_free_asset = '^IRX'
+
+rf_file_name = 'rf_adj_close'
+rf_adj_close = get_market_data(file_name=rf_file_name,
+                                data_col='Adj Close',
+                                symbols=[risk_free_asset],
+                                data_source=data_source,
+                                start_date=start_date,
+                                end_date=end_date)
+
+rf_adj_rate_np: np.array = np.array( rf_adj_close.values ) / 100
+rf_daily_np = ((1 + rf_adj_rate_np) ** (1/360)) - 1
+rf_daily_df: pd.DataFrame = pd.DataFrame( rf_daily_np, index=rf_adj_close.index, columns=['^IRX'])
+
+def adjust_time_series(return_df: pd.DataFrame, rf_values: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    ret_index = pd.to_datetime(return_df.index)
+    rf_index = pd.to_datetime(rf_values.index)
+        # filter the close prices
+    matching_dates = ret_index.isin( rf_index )
+    ret_adj = return_df[matching_dates]
+    # filter the rf_prices
+    ret_index = pd.to_datetime(ret_adj.index)
+    matching_dates = rf_index.isin(ret_index)
+    rf_prices_adj = rf_values[matching_dates]
+    return ret_adj, rf_prices_adj
+
+def excess_return_series(asset_return: pd.Series, risk_free: pd.Series) -> pd.DataFrame:
+    excess_ret = asset_return.values - risk_free.values
+    excess_ret_df = pd.DataFrame(excess_ret, index=asset_return.index)
+    return excess_ret_df
+
+
+def excess_return_df(asset_return: pd.DataFrame, risk_free: pd.Series) -> pd.DataFrame:
+    excess_df: pd.DataFrame = pd.DataFrame()
+    for i, col in enumerate(asset_return.columns):
+        e_df = excess_return_series(asset_return[col], risk_free)
+        excess_df.insert(i, col, e_df)
+    return excess_df
+
+def calc_sharpe_ratio(asset_return: pd.DataFrame, risk_free: pd.Series) -> pd.DataFrame:
+
+    excess_return = excess_return_df(asset_return, risk_free)
+    return_mean: List = []
+    return_stddev: List = []
+    for col in excess_return.columns:
+        mu = np.mean(excess_return[col])
+        std = np.stdev(excess_return[col])
+        return_mean.append(mu)
+        return_stddev.append(std)
+    # daily Sharpe ratio
+    # https://quant.stackexchange.com/questions/2260/how-to-annualize-sharpe-ratio
+    sharpe_ratio = np.asarray(return_mean) / np.asarray(return_stddev)
+    result_df: pd.DataFrame = pd.DataFrame(sharpe_ratio).transpose()
+    result_df.columns = asset_return.columns
+    ix = asset_return.index
+    ix_start = ix[0].date()
+    ix_end = ix[len(ix)-1].date()
+    index_str = f'{ix_start} : {ix_end}'
+    result_df.index = [ index_str ]
+    return result_df
+
+# ret_adj_df, rf_daily = adjust_time_series(portfolio_sixty_forty_return, rf_daily_df)
+# sharpe_ratio = calc_sharpe_ratio(ret_adj_df, rf_daily)
+
 print("hi there")
 
 def main():
