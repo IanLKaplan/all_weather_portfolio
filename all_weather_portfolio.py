@@ -296,6 +296,23 @@ aom_total_np[0] = initial_investment
 for t in range(1, aom_total_np.shape[0]):
     aom_total_np[t] = aom_total_np[t-1] + (aom_total_np[t-1] * aom_returns[t-1])
 
+def annual_return(portfolio_total_df: pd.DataFrame, trading_days: int) -> pd.DataFrame:
+    year_range: list = list(t for t in range(portfolio_total_df.shape[0]-1, -1, -trading_days))
+    year_range.reverse()
+    portfolio_total_np: np.array = np.array(portfolio_total_df)
+    annual_ret_l: list = []
+    annual_dates_l: list = []
+    for ix in range(1, len(year_range)):
+        ret = (portfolio_total_np[ year_range[ix] ] / portfolio_total_np[ year_range[ix-1] ]) - 1
+        ret = float((ret * 100).round(2))
+        annual_ret_l.append(ret)
+        annual_dates_l.append(portfolio_total_df.index[year_range[ix]])
+
+    annual_ret_df: pd.DataFrame = pd.DataFrame(annual_ret_l, index=annual_dates_l)
+    annual_ret_df.columns = ['Annual Return']
+    return annual_ret_df
+
+annual_ret_df = annual_return(portfolio_total_forty_sixty_df, trading_days)
 
 print("hi there")
 
