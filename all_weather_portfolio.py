@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from tabulate import tabulate
 from typing import List, Tuple
 from pandas_datareader import data
+from scipy.stats import stats
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import pandas as pd
@@ -179,7 +180,7 @@ etf_close: pd.DataFrame = get_market_data(file_name=etf_close_file,
 # +/- for each asset for portfolio rebalancing
 portfolio_range = 0.05
 
-returns = return_df(etf_close)
+returns = return_df(etf_adj_close)
 
 def calc_rebalanced_portfolio(holdings: pd.DataFrame,
                             etf_close: pd.DataFrame,
@@ -296,7 +297,7 @@ aom_total_np[0] = initial_investment
 for t in range(1, aom_total_np.shape[0]):
     aom_total_np[t] = aom_total_np[t-1] + (aom_total_np[t-1] * aom_returns[t-1])
 
-def annual_return(portfolio_total_df: pd.DataFrame, trading_days: int) -> pd.DataFrame:
+def period_return(portfolio_total_df: pd.DataFrame, trading_days: int) -> pd.DataFrame:
     year_range: list = list(t for t in range(portfolio_total_df.shape[0]-1, -1, -trading_days))
     year_range.reverse()
     portfolio_total_np: np.array = np.array(portfolio_total_df)
@@ -312,7 +313,7 @@ def annual_return(portfolio_total_df: pd.DataFrame, trading_days: int) -> pd.Dat
     annual_ret_df.columns = ['Annual Return']
     return annual_ret_df
 
-annual_ret_df = annual_return(portfolio_total_forty_sixty_df, trading_days)
+annual_ret_df = period_return(portfolio_total_forty_sixty_df, trading_days)
 
 risk_free_asset = '^IRX'
 
@@ -354,7 +355,6 @@ def excess_return_df(asset_return: pd.DataFrame, risk_free: pd.Series) -> pd.Dat
     return excess_df
 
 def calc_sharpe_ratio(asset_return: pd.DataFrame, risk_free: pd.Series) -> pd.DataFrame:
-
     excess_return = excess_return_df(asset_return, risk_free)
     return_mean: List = []
     return_stddev: List = []
@@ -375,8 +375,64 @@ def calc_sharpe_ratio(asset_return: pd.DataFrame, risk_free: pd.Series) -> pd.Da
     result_df.index = [ index_str ]
     return result_df
 
-# ret_adj_df, rf_daily = adjust_time_series(portfolio_sixty_forty_return, rf_daily_df)
-# sharpe_ratio = calc_sharpe_ratio(ret_adj_df, rf_daily)
+
+def calc_asset_beta(asset_df: pd.DataFrame, market_df: pd.DataFrame) -> float:
+    asset_np = np.array(asset_df).flatten()
+    market_np = np.array(market_df).flatten()
+    sd_asset = np.std(asset_np)
+    sd_market = np.std(market_np)
+    # cor_tuple: correlation and p-value
+    cor_tuple = stats.pearsonr(asset_np, market_np)
+    cor = cor_tuple[0]
+    beta = cor * (sd_asset/sd_market)
+    return beta
+
+
+portfolio_beta = calc_asset_beta(portfolio_sixty_forty_return, market_return)
+vti_beta = calc_asset_beta(returns['VTI'], market_return)
+vglt_beta = calc_asset_beta(returns['VGLT'], market_return)
+beta_np = np.array([vti_beta, vglt_beta, portfolio_beta])
+beta_df: pd.DataFrame = pd.DataFrame(beta_np).transpose()
+print(tabulate(beta_df, headers=['', 'VTI Beta', 'VGLT Beta', 'Portfolio Beta'], tablefmt='fancy_grid'))
+
+dividend_symbols = ['PHK', 'RCS', 'PTY', 'PMF', 'SCHP']
+# the Schwab TIPS fund was started in August 2010
+div_start_date_str = start_date_str = '2011-01-01'
+div_start_date: datetime = datetime.fromisoformat(div_start_date_str)
+# end date is the previously defined end_date
+dividend_adj_close_file = "dividend_adj_close"
+
+dividend_adj_close = get_market_data(file_name=dividend_adj_close_file,
+                                     symbols=dividend_symbols,
+                                     data_col='Adj Close',
+                                     data_source=data_source,
+                                     start_date=div_start_date,
+                                     end_date=end_date)
+
+dividend_returns = return_df(dividend_adj_close)
+
+
+def calc_asset_value(initial_value: int, returns: pd.DataFrame) -> pd.DataFrame:
+    length = returns.shape[0] + 1
+    portfolio_value_np: np.array = np.zeros(length)
+    portfolio_value_np[0] = initial_value
+    for t in range(1, length):
+        portfolio_value_np[t] = portfolio_value_np[t-1] + (portfolio_value_np[t-1] * returns[t-1])
+    return pd.DataFrame(portfolio_value_np)
+
+
+def calc_portfolio_value(initial_value: int, start_date, asset_returns_df: pd.DataFrame) -> pd.DataFrame:
+    portfolio_df: pd.DataFrame = pd.DataFrame()
+    index = [start_date, asset_returns_df.index]
+    for col in asset_returns_df.columns:
+        returns = asset_returns_df[col]
+        asset_value = calc_asset_value(initial_value, returns)
+        asset_value.column = col
+        asset_value.index = returns.index
+        portfolio_df = pd.concat(portfolio_df, asset_value)
+    return portfolio_df
+
+asset_returns_df = calc_portfolio_value(initial_value=initial_investment, start_date=div_start_date, asset_returns_df=dividend_returns)
 
 print("hi there")
 
