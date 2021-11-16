@@ -11,6 +11,7 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 import tempfile
+import quantstats as qs
 
 def get_market_data(file_name: str,
                     data_col: str,
@@ -520,14 +521,75 @@ market_portfolio_df = calc_market_portfolio(market_return_df=trunc_market_return
                                             initial_investment=initial_investment,
                                             initial_market_price=leveraged_spy_price)
 
-stats = [calc_asset_beta(leveraged_returns, trunc_market_return),
-         np.std(leveraged_returns),
+leveraged_portfolio_total_return = return_df(leveraged_portfolio_total_df)
+stat_values = [calc_asset_beta(leveraged_portfolio_total_return, trunc_market_return),
+         np.std(leveraged_portfolio_total_return),
          np.std(trunc_market_return)]
 
-stats_df = pd.DataFrame(stats).transpose()
+stats_df = pd.DataFrame(stat_values).transpose()
 stats_df.columns = ['2X Beta', '2X StdDev', 'Market StdDev']
 
+print("2X portfolio beta and standard deviation of the daily return")
 print(tabulate(stats_df, headers=['', *stats_df.columns], tablefmt='fancy_grid'))
+
+def adjust_time_series(return_df: pd.DataFrame, rf_values: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    ret_index = pd.to_datetime(return_df.index)
+    rf_index = pd.to_datetime(rf_values.index)
+        # filter the close prices
+    matching_dates = ret_index.isin( rf_index )
+    ret_adj = return_df[matching_dates]
+    # filter the rf_prices
+    ret_index = pd.to_datetime(ret_adj.index)
+    matching_dates = rf_index.isin(ret_index)
+    rf_prices_adj = rf_values[matching_dates]
+    return ret_adj, rf_prices_adj
+
+def excess_return_series(asset_return: pd.Series, risk_free: pd.Series) -> pd.DataFrame:
+    excess_ret = asset_return.values.flatten() - risk_free.values.flatten()
+    excess_ret_df = pd.DataFrame(excess_ret, index=asset_return.index)
+    return excess_ret_df
+
+
+def excess_return_df(asset_return: pd.DataFrame, risk_free: pd.Series) -> pd.DataFrame:
+    excess_df: pd.DataFrame = pd.DataFrame()
+    for col in asset_return.columns:
+        e_df = excess_return_series(asset_return[col], risk_free)
+        e_df.columns = [col]
+        excess_df[col] = e_df
+    return excess_df
+
+def calc_sharpe_ratio(asset_return: pd.DataFrame, risk_free: pd.Series, period: int) -> pd.DataFrame:
+    excess_return = excess_return_df(asset_return, risk_free)
+    return_mean: List = []
+    return_stddev: List = []
+    for col in excess_return.columns:
+        mu = np.mean(excess_return[col])
+        std = np.std(excess_return[col])
+        return_mean.append(mu)
+        return_stddev.append(std)
+    # daily Sharpe ratio
+    # https://quant.stackexchange.com/questions/2260/how-to-annualize-sharpe-ratio
+    sharpe_ratio = (np.asarray(return_mean) / np.asarray(return_stddev)) * np.sqrt(period)
+    result_df: pd.DataFrame = pd.DataFrame(sharpe_ratio).transpose()
+    result_df.columns = asset_return.columns
+    ix = asset_return.index
+    dateformat = '%Y-%m-%d'
+    ix_start = datetime.strptime(ix[0], dateformat).date()
+    ix_end = datetime.strptime(ix[len(ix)-1], dateformat).date()
+    index_str = f'{ix_start} : {ix_end}'
+    result_df.index = [ index_str ]
+    return result_df
+
+
+ret_adj_df, rf_daily = adjust_time_series(portfolio_sixty_forty_return, rf_daily_df)
+sharpe_ratio_sixty_forty = calc_sharpe_ratio(ret_adj_df, rf_daily, trading_days)
+ret_adj_df, rf_daily = adjust_time_series(market_return, rf_daily_df)
+sharpe_ratio_market = calc_sharpe_ratio(ret_adj_df, rf_daily, trading_days)
+
+sixty_forty_sharpe = (np.mean(portfolio_sixty_forty_return) / np.std(portfolio_sixty_forty_return)) * np.sqrt(trading_days)
+
+lib_sixty_forty_sharpe = qs.stats.sharpe(portfolio_sixty_forty_return)
+lib_spy_sharpe = qs.stats.sharpe(market_return)
 
 print("hi there")
 
