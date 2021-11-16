@@ -4,6 +4,7 @@ from tabulate import tabulate
 from typing import List, Tuple
 from pandas_datareader import data
 from scipy.stats import stats
+from pandas import Timestamp
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import pandas as pd
@@ -239,23 +240,34 @@ spy_adj_close = get_market_data(file_name=spy_close_file,
                                 start_date=start_date,
                                 end_date=end_date)
 
-spy_close_start_file = 'spy_close_start'
-spy_close_start = get_market_data(file_name=spy_close_start_file,
-                                data_col='Adj Close',
+spy_close_start_file = 'spy_close'
+spy_close = get_market_data(file_name=spy_close_start_file,
+                                data_col='Close',
                                 symbols=[market],
                                 data_source=data_source,
                                 start_date=start_date,
-                                end_date=start_date+timedelta(days=10))
+                                end_date=end_date)
 
-spy_initial_price = spy_close_start[market][0]
+spy_initial_price = spy_close[market][0]
 
 market_return = return_df(spy_adj_close)
-market_portfolio_np: np.array = np.zeros(spy_adj_close.shape[0])
 
-market_portfolio_np[0] = (initial_investment // spy_initial_price) * spy_initial_price
-for i in range(1, market_portfolio_np.shape[0]):
-    market_portfolio_np[i] = market_portfolio_np[i-1] + (market_portfolio_np[i-1] * market_return[market][i-1])
-market_portfolio_df: pd.DataFrame = pd.DataFrame(market_portfolio_np, index=spy_adj_close.index, columns=[market])
+def calc_market_portfolio(market_return_df: pd.DataFrame,
+                          date_index: pd.Index,
+                          initial_investment: int,
+                          initial_market_price: float ) -> pd.DataFrame:
+    market_portfolio_np: np.array = np.zeros(len(date_index))
+    market_portfolio_np[0] = (initial_investment // initial_market_price) * initial_market_price
+    for i in range(1, market_portfolio_np.shape[0]):
+        market_portfolio_np[i] = market_portfolio_np[i-1] + (market_portfolio_np[i-1] * market_return_df[market][i-1])
+    market_portfolio_df: pd.DataFrame = pd.DataFrame(market_portfolio_np, index=date_index, columns=[market])
+    return market_portfolio_df
+
+
+market_portfolio_df = calc_market_portfolio(market_return_df=market_return,
+                                            date_index=spy_adj_close.index,
+                                            initial_investment=initial_investment,
+                                            initial_market_price=spy_initial_price)
 
 portfolios_df: pd.DataFrame = pd.concat([portfolio_total_df, market_portfolio_df], axis=1)
 
@@ -421,18 +433,101 @@ def calc_asset_value(initial_value: int, returns: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(portfolio_value_np)
 
 
-def calc_portfolio_value(initial_value: int, start_date, asset_returns_df: pd.DataFrame) -> pd.DataFrame:
+def calc_portfolio_value(initial_value: int, date_index: pd.Index, asset_returns_df: pd.DataFrame) -> pd.DataFrame:
     portfolio_df: pd.DataFrame = pd.DataFrame()
     index = [start_date, asset_returns_df.index]
     for col in asset_returns_df.columns:
         returns = asset_returns_df[col]
         asset_value = calc_asset_value(initial_value, returns)
-        asset_value.column = col
-        asset_value.index = returns.index
-        portfolio_df = pd.concat(portfolio_df, asset_value)
+        asset_value.columns = [col]
+        asset_value.index = date_index
+        portfolio_df[col] = asset_value
     return portfolio_df
 
-asset_returns_df = calc_portfolio_value(initial_value=initial_investment, start_date=div_start_date, asset_returns_df=dividend_returns)
+asset_returns_df = calc_portfolio_value(initial_value=initial_investment, date_index=dividend_adj_close.index, asset_returns_df=dividend_returns)
+
+
+def calc_basket_beta(asset_returns_df: pd.DataFrame, market_return_df: pd.DataFrame) -> pd.DataFrame:
+    asset_beta_l: list = []
+    for col in asset_returns_df.columns:
+        asset_beta = calc_asset_beta(asset_returns_df[col], market_return_df)
+        asset_beta_l.append(asset_beta)
+    basket_beta_df: pd.DataFrame = pd.DataFrame(asset_beta_l).transpose()
+    basket_beta_df.columns = asset_returns_df.columns
+    return basket_beta_df
+
+market_return_index = market_return.index
+dividend_return_index = dividend_returns.index
+market_filter = market_return_index.isin(dividend_return_index)
+
+trunc_market_return = market_return[market_filter]
+asset_beta_df = calc_basket_beta(dividend_returns, trunc_market_return)
+asset_beta_df.index = ['Beta']
+print(tabulate(asset_beta_df, headers=['', *asset_beta_df.columns], tablefmt='fancy_grid'))
+
+leveraged_etf_symbols = [ 'SSO', 'UBT', 'UST']
+leveraged_etf_weights = {"SSO": 0.40, "UBT": 0.44, "UST": 0.16 }
+leveraged_etf_weights_df: pd.DataFrame = pd.DataFrame( leveraged_etf_weights.values()).transpose()
+leveraged_etf_weights_df.columns = leveraged_etf_weights.keys()
+
+leveraged_etf_start_date_str = '2011-01-01'
+leveraged_start_date: datetime = datetime.fromisoformat(leveraged_etf_start_date_str)
+
+leveraged_etf_close_file = 'leveraged_etf_close'
+# Fetch the adjusted close price for the unleveraged "all weather" set of ETFs'
+# VTI, VGLT, VGIT, VPU and IAU
+leveraged_etf_close: pd.DataFrame = get_market_data(file_name=leveraged_etf_close_file,
+                                          data_col="Close",
+                                          symbols=leveraged_etf_symbols,
+                                          data_source=data_source,
+                                          start_date=leveraged_start_date,
+                                          end_date=end_date)
+
+leveraged_etf_adj_close_file = 'leveraged_etf_adj_close'
+# Fetch the adjusted close price for the unleveraged "all weather" set of ETFs'
+# VTI, VGLT, VGIT, VPU and IAU
+leveraged_etf_adj_close: pd.DataFrame = get_market_data(file_name=leveraged_etf_adj_close_file,
+                                          data_col="Adj Close",
+                                          symbols=leveraged_etf_symbols,
+                                          data_source=data_source,
+                                          start_date=leveraged_start_date,
+                                          end_date=end_date)
+
+leveraged_prices = leveraged_etf_close[0:1]
+leveraged_returns = return_df(leveraged_etf_adj_close)
+
+leveraged_holdings, shares = calc_portfolio_holdings(initial_investment=initial_investment,
+                                           weights=leveraged_etf_weights_df,
+                                           prices=leveraged_prices)
+
+leveraged_portfolio_df, leveraged_portfolio_total_df = calc_rebalanced_portfolio(holdings=leveraged_holdings,
+                                                             etf_close=leveraged_etf_close,
+                                                             returns=leveraged_returns,
+                                                             weights=leveraged_etf_weights_df,
+                                                             rebalance_days=trading_days)
+
+market_return_index = market_return.index
+leveraged_return_index = leveraged_returns.index
+market_filter = market_return_index.isin(leveraged_return_index)
+trunc_market_return = market_return[market_filter]
+
+initial_start_date = leveraged_return_index[0]
+spy_close_index = spy_close.index.isin([initial_start_date])
+leveraged_spy_price = float(spy_close[spy_close_index].values[0])
+
+market_portfolio_df = calc_market_portfolio(market_return_df=trunc_market_return,
+                                            date_index=leveraged_etf_close.index,
+                                            initial_investment=initial_investment,
+                                            initial_market_price=leveraged_spy_price)
+
+stats = [calc_asset_beta(leveraged_returns, trunc_market_return),
+         np.std(leveraged_returns),
+         np.std(trunc_market_return)]
+
+stats_df = pd.DataFrame(stats).transpose()
+stats_df.columns = ['2X Beta', '2X StdDev', 'Market StdDev']
+
+print(tabulate(stats_df, headers=['', *stats_df.columns], tablefmt='fancy_grid'))
 
 print("hi there")
 
