@@ -3,15 +3,21 @@ from datetime import datetime, timedelta
 from tabulate import tabulate
 from typing import List, Tuple
 from pandas_datareader import data
-from scipy.stats import stats
-from pandas import Timestamp
 import matplotlib.pyplot as plt
-import matplotlib as mpl
+import scipy.stats as stats
 import pandas as pd
 import numpy as np
 from pathlib import Path
 import tempfile
-import quantstats as qs
+
+plt.style.use('seaborn-whitegrid')
+
+
+"""
+  Ideally this function would go in a local package. However, I want this Jupyter notebook
+  to display on github and I don't know of a way to get the local package import install
+  and import to work.
+"""
 
 def get_market_data(file_name: str,
                     data_col: str,
@@ -47,26 +53,33 @@ def get_market_data(file_name: str,
     return close_data
 
 
-data_source = 'yahoo'
 
+data_source = 'yahoo'
 # yyyy-mm-dd
 start_date_str = '2010-01-01'
 start_date: datetime = datetime.fromisoformat(start_date_str)
 end_date: datetime = datetime.today() - timedelta(days=1)
 
+
+
+
 etf_symbols = ["VTI", "VGLT", "VGIT", "VPU", "IAU"]
 
-close_price_file = "etf_start_close_prices"
-close_prices: pd.DataFrame =  get_market_data(file_name=close_price_file,
-                                              data_col='Close',
-                                              symbols=etf_symbols,
-                                              data_source=data_source,
-                                              start_date=start_date,
-                                              end_date=start_date+timedelta(days=10))
+# Fetch the close prices for the entire time period
+#
+etf_close_file = 'etf_close'
+# Fetch all of the close prices: this is faster than fetching only the dates needed.
+etf_close: pd.DataFrame = get_market_data(file_name=etf_close_file,
+                                          data_col='Close',
+                                          symbols=etf_symbols,
+                                          data_source=data_source,
+                                          start_date=start_date,
+                                          end_date=end_date)
 
 etf_weights = {"VTI": 0.30, "VGLT": 0.40, "VGIT": 0.15, "VPU": 0.08, "IAU": 0.07}
 
-prices = close_prices[0:1]
+prices = etf_close[0:1]
+
 
 def calc_portfolio_holdings(initial_investment: int, weights: pd.DataFrame, prices: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
@@ -90,6 +103,28 @@ def calc_portfolio_holdings(initial_investment: int, weights: pd.DataFrame, pric
     shares_df.columns = weights.columns
     return holdings_df, shares_df
 
+
+def simple_return(time_series: List, period: int) -> List :
+    return list(((time_series[i]/time_series[i-period]) - 1.0 for i in range(period, len(time_series), period)))
+
+
+def return_df(time_series_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Given a data frame consisting of price time series, return a data frame
+    that consists of the simple returns for the time series.  The returned data
+    frame will have the same columns, but the time index will be one time period
+    less.
+    """
+    r_df: pd.DataFrame = pd.DataFrame()
+    col_names = time_series_df.columns
+    for col in col_names:
+        col_vals = time_series_df[col]
+        col_ret = simple_return(col_vals, 1)
+        r_df[col] = col_ret
+    index = time_series_df.index
+    return r_df.set_index(index[1:len(index)])
+
+
 # initial investment, in dollars
 initial_investment = 10000
 
@@ -100,9 +135,18 @@ holdings, shares = calc_portfolio_holdings(initial_investment=initial_investment
                                            weights=weights_df,
                                            prices=prices)
 
+print("Portfolio weights:")
+print(tabulate(weights_df, headers=['', *weights_df.columns], tablefmt='fancy_grid'))
+print("Number of Shares:")
+print(tabulate(shares, headers=['As of Date', *shares.columns], tablefmt='fancy_grid'))
+print(f'Total invested from {initial_investment} is {int(holdings.sum(axis=1))}')
+
+print("Value of share holdings:")
+print(tabulate(holdings, headers=['As of Date', *holdings.columns], tablefmt='fancy_grid'))
 
 trading_days = 253
 days_in_quarter = trading_days // 4
+half_year = trading_days // 2
 
 def do_rebalance(cash_holdings: pd.DataFrame, weights_df: pd.DataFrame, portfolio_range: float) -> bool:
     """
@@ -139,29 +183,8 @@ def portfolio_rebalance(cash_holdings: pd.DataFrame,
                                                        prices=prices)
     return new_holdings
 
-def simple_return(time_series: List, period: int) -> List :
-    return list(((time_series[i]/time_series[i-period]) - 1.0 for i in range(period, len(time_series), period)))
-
-
-def return_df(time_series_df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Given a data frame consisting of price time series, return a data frame
-    that consists of the simple returns for the time series.  The returned data
-    frame will have the same columns, but the time index will be one time period
-    less.
-    """
-    r_df: pd.DataFrame = pd.DataFrame()
-    col_names = time_series_df.columns
-    for col in col_names:
-        col_vals = time_series_df[col]
-        col_ret = simple_return(col_vals, 1)
-        r_df[col] = col_ret
-    index = time_series_df.index
-    return r_df.set_index(index[1:len(index)])
 
 etf_adj_close_file = 'etf_adj_close'
-etf_close_file = 'etf_close'
-
 # Fetch the adjusted close price for the unleveraged "all weather" set of ETFs'
 # VTI, VGLT, VGIT, VPU and IAU
 etf_adj_close: pd.DataFrame = get_market_data(file_name=etf_adj_close_file,
@@ -171,18 +194,32 @@ etf_adj_close: pd.DataFrame = get_market_data(file_name=etf_adj_close_file,
                                           start_date=start_date,
                                           end_date=end_date)
 
-# Fetch all of the close prices: this is faster than fetching only the dates needed.
-etf_close: pd.DataFrame = get_market_data(file_name=etf_close_file,
-                                          data_col="Close",
-                                          symbols=etf_symbols,
-                                          data_source=data_source,
-                                          start_date=start_date,
-                                          end_date=end_date)
-
 # +/- for each asset for portfolio rebalancing
 portfolio_range = 0.05
 
 returns = return_df(etf_adj_close)
+
+portfolio_np = np.zeros(etf_close.shape, dtype=np.float64)
+portfolio_total_np = np.zeros(etf_close.shape[0])
+portfolio_total_np[0] = holdings.sum(axis=1)
+# initialize the first row with the dollar value of the portfolio holdings.
+portfolio_np[0,] = holdings
+
+for t in range(1, portfolio_np.shape[0]):
+    for col, stock in enumerate(holdings.columns):
+        portfolio_np[t, col] = portfolio_np[t-1, col] + (portfolio_np[t-1, col] * returns[stock][t-1])
+        portfolio_total_np[t] = portfolio_total_np[t] + portfolio_np[t,col]
+
+
+portfolio_total_df: pd.DataFrame = pd.DataFrame(portfolio_total_np, index=etf_close.index, columns=['Portfolio'])
+# portfolio_total_df.plot(title="Portfolio Value (without rebalancing)", grid=True, figsize=(10,8))
+
+portfolio_total_np = portfolio_np.sum(axis=1)
+portfolio_percent_np = portfolio_np / portfolio_total_np[:,None]
+market_percent = portfolio_percent_np[:,0]
+market_percent_df: pd.DataFrame = pd.DataFrame(market_percent, index=etf_close.index, columns=['Market'])
+# market_percent_df.plot(title="Percentage of Portfolio invested in the Market", grid=True, figsize=(10,8))
+
 
 def calc_rebalanced_portfolio(holdings: pd.DataFrame,
                             etf_close: pd.DataFrame,
@@ -213,11 +250,45 @@ def calc_rebalanced_portfolio(holdings: pd.DataFrame,
     portfolio_total_df.columns = ['Portfolio Value']
     return portfolio_df, portfolio_total_df
 
-portfolio_df, portfolio_total_df = calc_rebalanced_portfolio(holdings=holdings,
+
+def plot_portfolio_weights(asset_values_df: pd.DataFrame, portfolio_total_df: pd.DataFrame) -> None:
+    portfolio_total_np = np.array(portfolio_total_df)
+    asset_values_np = np.array(asset_values_df)
+    portfolio_percent_np = asset_values_np / portfolio_total_np
+
+    col_names = asset_values_df.columns
+    fig, ax = plt.subplots(asset_values_np.shape[1], figsize=(10,8))
+    for col in range(0, asset_values_np.shape[1]):
+        asset_percent = portfolio_percent_np[:,col]
+        label = f'Portfolio Percent for {col_names[col]}'
+        ax[col].set_xlabel(label)
+        ax[col].grid(True)
+        ax[col].plot(asset_percent)
+    fig.tight_layout()
+    plt.show()
+
+
+portfolio_quarterly_df, portfolio_total_quarterly_df = calc_rebalanced_portfolio(holdings=holdings,
                                                              etf_close=etf_close,
                                                              returns=returns,
                                                              weights=weights_df,
                                                              rebalance_days=days_in_quarter)
+
+# portfolio_total_quarterly_df.plot(title="Portfolio Value (quarterly rebalanced)", grid=True, figsize=(10,8))
+
+print(tabulate(weights_df, headers=['', *weights_df.columns], tablefmt='fancy_grid'))
+
+# plot_portfolio_weights(portfolio_quarterly_df, portfolio_total_quarterly_df)
+
+portfolio_biannual_df, portfolio_total_biannual_df = calc_rebalanced_portfolio(holdings=holdings,
+                                                             etf_close=etf_close,
+                                                             returns=returns,
+                                                             weights=weights_df,
+                                                             rebalance_days=half_year)
+
+# portfolio_total_biannual_df.plot(title="Portfolio Value (rebalanced twice a year)", grid=True, figsize=(10,8))
+
+# plot_portfolio_weights(portfolio_biannual_df, portfolio_total_biannual_df)
 
 portfolio_yearly_df, portfolio_total_yearly_df = calc_rebalanced_portfolio(holdings=holdings,
                                                              etf_close=etf_close,
@@ -225,12 +296,23 @@ portfolio_yearly_df, portfolio_total_yearly_df = calc_rebalanced_portfolio(holdi
                                                              weights=weights_df,
                                                              rebalance_days=trading_days)
 
-portfolio_total_np = np.array(portfolio_total_df)
-portfolio_np = np.array(portfolio_df)
-portfolio_percent_np = portfolio_np / portfolio_total_np
+# portfolio_total_yearly_df.plot(title="Portfolio Value (rebalanced once a year)", grid=True, figsize=(10,8))
 
-for col in range(0, portfolio_percent_np.shape[1]):
-    percent = portfolio_percent_np[:,col]
+# plot_portfolio_weights(portfolio_yearly_df, portfolio_total_yearly_df)
+
+portfolio_quarterly_return = return_df(portfolio_total_quarterly_df)
+portfolio_biannual_return = return_df(portfolio_total_biannual_df)
+portfolio_yearly_return = return_df(portfolio_total_yearly_df)
+
+portfolio_quarterly_sd = np.std( portfolio_quarterly_return ) * np.sqrt(portfolio_quarterly_return.shape[0])
+portfolio_biannual_sd = np.std( portfolio_biannual_return ) * np.sqrt(portfolio_biannual_return.shape[0])
+portfolio_yearly_sd = np.std( portfolio_yearly_return ) * np.sqrt(portfolio_yearly_return.shape[0])
+
+sd_df = pd.DataFrame([portfolio_quarterly_sd, portfolio_biannual_sd, portfolio_yearly_sd]).transpose()
+
+
+print(tabulate(sd_df, headers=['stddev', 'quarterly', 'bi-annual', 'yearly'], tablefmt='fancy_grid'))
+
 
 market = 'SPY'
 spy_close_file = 'spy_adj_close'
@@ -270,9 +352,12 @@ market_portfolio_df = calc_market_portfolio(market_return_df=market_return,
                                             initial_investment=initial_investment,
                                             initial_market_price=spy_initial_price)
 
-portfolios_df: pd.DataFrame = pd.concat([portfolio_total_df, market_portfolio_df], axis=1)
 
-forty_sixty_weights_df = pd.DataFrame([0.40, 0.30, 0.30]).transpose()
+portfolios_df: pd.DataFrame = pd.concat([portfolio_total_yearly_df, market_portfolio_df], axis=1)
+
+# portfolios_df.plot(title="Portfolio Value (rebalanced once a year) + SPY", grid=True, figsize=(10,8))
+
+forty_sixty_weights_df = pd.DataFrame([0.40, 0.44, 0.16]).transpose()
 forty_sixty_weights_df.columns = ['VTI', 'VGLT', 'VGIT']
 forty_sixty_holdings, forty_sixty_shares = calc_portfolio_holdings(initial_investment=initial_investment,
                                            weights=forty_sixty_weights_df,
@@ -284,15 +369,18 @@ portfolio_forty_sixty_df, portfolio_total_forty_sixty_df = calc_rebalanced_portf
                                                              weights=forty_sixty_weights_df,
                                                              rebalance_days=trading_days)
 
+portfolio_total_forty_sixty_df.columns = ['40/60 Portfolio']
+portfolio_total_yearly_df.columns = ['All Weather']
+portfolios_df: pd.DataFrame = pd.concat([portfolio_total_forty_sixty_df, portfolio_total_yearly_df], axis=1)
 
-portfolio_yearly_return = return_df(portfolio_total_yearly_df)
+print("40/60 Portfolio weights:")
+print(tabulate(forty_sixty_weights_df, headers=['', *forty_sixty_weights_df.columns], tablefmt='fancy_grid'))
 
-portfolio_yearly_sd = np.std( portfolio_yearly_return ) * np.sqrt(portfolio_yearly_return.shape[0])
-
+# portfolios_df.plot(title="40/60 Portfolio + All Weather Portfolio", grid=True, figsize=(10,8))
 portfolio_sixty_forty_return = return_df(portfolio_total_forty_sixty_df)
 portfolio_sixty_forty_sd = np.std( portfolio_sixty_forty_return ) * np.sqrt(portfolio_sixty_forty_return.shape[0])
-
-sd_df = pd.DataFrame([portfolio_sixty_forty_sd, portfolio_yearly_sd]).transpose()
+sd_df = pd.DataFrame([np.array(portfolio_sixty_forty_sd), np.array(portfolio_yearly_sd)]).transpose()
+print("Daily Return Portfolio volatility")
 print(tabulate(sd_df, headers=['stddev', '60/40', 'All Weather'], tablefmt='fancy_grid'))
 
 aom_adj_close_file = 'aom_adj_close'
@@ -310,83 +398,60 @@ aom_total_np[0] = initial_investment
 for t in range(1, aom_total_np.shape[0]):
     aom_total_np[t] = aom_total_np[t-1] + (aom_total_np[t-1] * aom_returns[t-1])
 
-def period_return(portfolio_total_df: pd.DataFrame, trading_days: int) -> pd.DataFrame:
-    year_range: list = list(t for t in range(portfolio_total_df.shape[0]-1, -1, -trading_days))
-    year_range.reverse()
-    portfolio_total_np: np.array = np.array(portfolio_total_df)
-    annual_ret_l: list = []
-    annual_dates_l: list = []
-    for ix in range(1, len(year_range)):
-        ret = (portfolio_total_np[ year_range[ix] ] / portfolio_total_np[ year_range[ix-1] ]) - 1
-        ret = float((ret * 100).round(2))
-        annual_ret_l.append(ret)
-        annual_dates_l.append(portfolio_total_df.index[year_range[ix]])
+aom_total_df: pd.DataFrame = pd.DataFrame( aom_total_np )
+aom_total_df.index = aom_adj_close.index
+aom_total_df.columns = ['AOM']
 
-    annual_ret_df: pd.DataFrame = pd.DataFrame(annual_ret_l, index=annual_dates_l)
-    annual_ret_df.columns = ['Annual Return']
-    return annual_ret_df
+aom_sd = np.std( aom_returns ) * np.sqrt(aom_returns.shape[0])
+sd_df = pd.DataFrame([aom_sd, portfolio_sixty_forty_sd]).transpose()
+print("Daily Return Portfolio volatility")
+print(tabulate(sd_df, headers=['stddev', 'AOM', '40/60'], tablefmt='fancy_grid'))
+
+portfolios_df: pd.DataFrame = pd.concat([aom_total_df, portfolio_total_forty_sixty_df], axis=1)
+# portfolios_df.plot(title="AOM + 40/60 Portfolio", grid=True, figsize=(10,8))
+
+
+def period_return(portfolio_total_df: pd.DataFrame, period: int) -> pd.DataFrame:
+    period_range: list = list(t for t in range(portfolio_total_df.shape[0]-1, -1, -period))
+    period_range.reverse()
+    portfolio_total_np: np.array = np.array(portfolio_total_df)
+    period_ret_l: list = []
+    period_dates_l: list = []
+    for ix in range(1, len(period_range)):
+        ret = (portfolio_total_np[ period_range[ix] ] / portfolio_total_np[ period_range[ix-1] ]) - 1
+        ret = float((ret * 100).round(2))
+        period_ret_l.append(ret)
+        period_dates_l.append(portfolio_total_df.index[period_range[ix]])
+
+    period_ret_df: pd.DataFrame = pd.DataFrame(period_ret_l, index=period_dates_l)
+    period_ret_df.columns = ['Return']
+    return period_ret_df
+
+
+def plot_return(ret_df: pd.DataFrame, title:str) -> None:
+    # Point and line plot of return values
+    fig, ax = plt.subplots()
+    fig.set_size_inches(10, 8)
+    fig.suptitle(title)
+    fig.autofmt_xdate()
+    plt.ylabel('Percent')
+    ax.plot(ret_df, '-bo')
+    plt.show()
+    # Plot a table return values
+    fig, ax = plt.subplots()
+    fig.patch.set_visible(False)
+    ax.axis('off')
+    ax.axis('tight')
+    the_table = plt.table(cellText=ret_df.values, rowLabels=ret_df.index, loc='center')
+    the_table.auto_set_font_size(False)
+    the_table.set_fontsize(14)
+    plt.show()
 
 annual_ret_df = period_return(portfolio_total_forty_sixty_df, trading_days)
+# plot_return(annual_ret_df, '40/60 Portfolio Annual Return')
 
-risk_free_asset = '^IRX'
-
-rf_file_name = 'rf_adj_close'
-rf_adj_close = get_market_data(file_name=rf_file_name,
-                                data_col='Adj Close',
-                                symbols=[risk_free_asset],
-                                data_source=data_source,
-                                start_date=start_date,
-                                end_date=end_date)
-
-rf_adj_rate_np: np.array = np.array( rf_adj_close.values ) / 100
-rf_daily_np = ((1 + rf_adj_rate_np) ** (1/360)) - 1
-rf_daily_df: pd.DataFrame = pd.DataFrame( rf_daily_np, index=rf_adj_close.index, columns=['^IRX'])
-
-def adjust_time_series(return_df: pd.DataFrame, rf_values: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    ret_index = pd.to_datetime(return_df.index)
-    rf_index = pd.to_datetime(rf_values.index)
-        # filter the close prices
-    matching_dates = ret_index.isin( rf_index )
-    ret_adj = return_df[matching_dates]
-    # filter the rf_prices
-    ret_index = pd.to_datetime(ret_adj.index)
-    matching_dates = rf_index.isin(ret_index)
-    rf_prices_adj = rf_values[matching_dates]
-    return ret_adj, rf_prices_adj
-
-def excess_return_series(asset_return: pd.Series, risk_free: pd.Series) -> pd.DataFrame:
-    excess_ret = asset_return.values - risk_free.values
-    excess_ret_df = pd.DataFrame(excess_ret, index=asset_return.index)
-    return excess_ret_df
-
-
-def excess_return_df(asset_return: pd.DataFrame, risk_free: pd.Series) -> pd.DataFrame:
-    excess_df: pd.DataFrame = pd.DataFrame()
-    for i, col in enumerate(asset_return.columns):
-        e_df = excess_return_series(asset_return[col], risk_free)
-        excess_df.insert(i, col, e_df)
-    return excess_df
-
-def calc_sharpe_ratio(asset_return: pd.DataFrame, risk_free: pd.Series) -> pd.DataFrame:
-    excess_return = excess_return_df(asset_return, risk_free)
-    return_mean: List = []
-    return_stddev: List = []
-    for col in excess_return.columns:
-        mu = np.mean(excess_return[col])
-        std = np.stdev(excess_return[col])
-        return_mean.append(mu)
-        return_stddev.append(std)
-    # daily Sharpe ratio
-    # https://quant.stackexchange.com/questions/2260/how-to-annualize-sharpe-ratio
-    sharpe_ratio = np.asarray(return_mean) / np.asarray(return_stddev)
-    result_df: pd.DataFrame = pd.DataFrame(sharpe_ratio).transpose()
-    result_df.columns = asset_return.columns
-    ix = asset_return.index
-    ix_start = ix[0].date()
-    ix_end = ix[len(ix)-1].date()
-    index_str = f'{ix_start} : {ix_end}'
-    result_df.index = [ index_str ]
-    return result_df
+mean_return_df = pd.DataFrame(annual_ret_df.mean(axis=0))
+print(tabulate(mean_return_df, headers=['', 'Mean Annual Return'], tablefmt='fancy_grid'))
 
 
 def calc_asset_beta(asset_df: pd.DataFrame, market_df: pd.DataFrame) -> float:
@@ -406,143 +471,47 @@ vti_beta = calc_asset_beta(returns['VTI'], market_return)
 vglt_beta = calc_asset_beta(returns['VGLT'], market_return)
 beta_np = np.array([vti_beta, vglt_beta, portfolio_beta])
 beta_df: pd.DataFrame = pd.DataFrame(beta_np).transpose()
-print(tabulate(beta_df, headers=['', 'VTI Beta', 'VGLT Beta', 'Portfolio Beta'], tablefmt='fancy_grid'))
 
-dividend_symbols = ['PHK', 'RCS', 'PTY', 'PMF', 'SCHP']
-# the Schwab TIPS fund was started in August 2010
-div_start_date_str = start_date_str = '2011-01-01'
-div_start_date: datetime = datetime.fromisoformat(div_start_date_str)
-# end date is the previously defined end_date
-dividend_adj_close_file = "dividend_adj_close"
-
-dividend_adj_close = get_market_data(file_name=dividend_adj_close_file,
-                                     symbols=dividend_symbols,
-                                     data_col='Adj Close',
-                                     data_source=data_source,
-                                     start_date=div_start_date,
-                                     end_date=end_date)
-
-dividend_returns = return_df(dividend_adj_close)
+print(tabulate(beta_df, headers=['', 'VTI Beta', 'VGLT Beta', '40/60 Portfolio'], tablefmt='fancy_grid'))
 
 
-def calc_asset_value(initial_value: int, returns: pd.DataFrame) -> pd.DataFrame:
-    length = returns.shape[0] + 1
-    portfolio_value_np: np.array = np.zeros(length)
-    portfolio_value_np[0] = initial_value
-    for t in range(1, length):
-        portfolio_value_np[t] = portfolio_value_np[t-1] + (portfolio_value_np[t-1] * returns[t-1])
-    return pd.DataFrame(portfolio_value_np)
+# 13-week yearly treasury bond quote
+risk_free_asset = '^IRX'
+
+rf_file_name = 'rf_adj_close'
+# The bond return is reported as a yearly return percentage
+rf_adj_close = get_market_data(file_name=rf_file_name,
+                                data_col='Adj Close',
+                                symbols=[risk_free_asset],
+                                data_source=data_source,
+                                start_date=start_date,
+                                end_date=end_date)
 
 
-def calc_portfolio_value(initial_value: int, date_index: pd.Index, asset_returns_df: pd.DataFrame) -> pd.DataFrame:
-    portfolio_df: pd.DataFrame = pd.DataFrame()
-    index = [start_date, asset_returns_df.index]
-    for col in asset_returns_df.columns:
-        returns = asset_returns_df[col]
-        asset_value = calc_asset_value(initial_value, returns)
-        asset_value.columns = [col]
-        asset_value.index = date_index
-        portfolio_df[col] = asset_value
-    return portfolio_df
 
-asset_returns_df = calc_portfolio_value(initial_value=initial_investment, date_index=dividend_adj_close.index, asset_returns_df=dividend_returns)
+# rf_adj_close.plot(title="Yield on the 13-week T-bill", grid=True, figsize=(10,8), ylabel='yearly percent')
+
+rf_adj_rate_np: np.array = np.array( rf_adj_close.values ) / 100
+rf_daily_np = ((1 + rf_adj_rate_np) ** (1/360)) - 1
+rf_daily_df: pd.DataFrame = pd.DataFrame( rf_daily_np, index=rf_adj_close.index, columns=['^IRX'])
+# rf_daily_df.plot(title="Daily yield on the 13-week T-bill", grid=True, figsize=(10,8), ylabel='daily yield x $10^{-5}$')
 
 
-def calc_basket_beta(asset_returns_df: pd.DataFrame, market_return_df: pd.DataFrame) -> pd.DataFrame:
-    asset_beta_l: list = []
-    for col in asset_returns_df.columns:
-        asset_beta = calc_asset_beta(asset_returns_df[col], market_return_df)
-        asset_beta_l.append(asset_beta)
-    basket_beta_df: pd.DataFrame = pd.DataFrame(asset_beta_l).transpose()
-    basket_beta_df.columns = asset_returns_df.columns
-    return basket_beta_df
-
-market_return_index = market_return.index
-dividend_return_index = dividend_returns.index
-market_filter = market_return_index.isin(dividend_return_index)
-
-trunc_market_return = market_return[market_filter]
-asset_beta_df = calc_basket_beta(dividend_returns, trunc_market_return)
-asset_beta_df.index = ['Beta']
-print(tabulate(asset_beta_df, headers=['', *asset_beta_df.columns], tablefmt='fancy_grid'))
-
-leveraged_etf_symbols = [ 'SSO', 'UBT', 'UST']
-leveraged_etf_weights = {"SSO": 0.40, "UBT": 0.44, "UST": 0.16 }
-leveraged_etf_weights_df: pd.DataFrame = pd.DataFrame( leveraged_etf_weights.values()).transpose()
-leveraged_etf_weights_df.columns = leveraged_etf_weights.keys()
-
-leveraged_etf_start_date_str = '2011-01-01'
-leveraged_start_date: datetime = datetime.fromisoformat(leveraged_etf_start_date_str)
-
-leveraged_etf_close_file = 'leveraged_etf_close'
-# Fetch the adjusted close price for the unleveraged "all weather" set of ETFs'
-# VTI, VGLT, VGIT, VPU and IAU
-leveraged_etf_close: pd.DataFrame = get_market_data(file_name=leveraged_etf_close_file,
-                                          data_col="Close",
-                                          symbols=leveraged_etf_symbols,
-                                          data_source=data_source,
-                                          start_date=leveraged_start_date,
-                                          end_date=end_date)
-
-leveraged_etf_adj_close_file = 'leveraged_etf_adj_close'
-# Fetch the adjusted close price for the unleveraged "all weather" set of ETFs'
-# VTI, VGLT, VGIT, VPU and IAU
-leveraged_etf_adj_close: pd.DataFrame = get_market_data(file_name=leveraged_etf_adj_close_file,
-                                          data_col="Adj Close",
-                                          symbols=leveraged_etf_symbols,
-                                          data_source=data_source,
-                                          start_date=leveraged_start_date,
-                                          end_date=end_date)
-
-leveraged_prices = leveraged_etf_close[0:1]
-leveraged_returns = return_df(leveraged_etf_adj_close)
-
-leveraged_holdings, shares = calc_portfolio_holdings(initial_investment=initial_investment,
-                                           weights=leveraged_etf_weights_df,
-                                           prices=leveraged_prices)
-
-leveraged_portfolio_df, leveraged_portfolio_total_df = calc_rebalanced_portfolio(holdings=leveraged_holdings,
-                                                             etf_close=leveraged_etf_close,
-                                                             returns=leveraged_returns,
-                                                             weights=leveraged_etf_weights_df,
-                                                             rebalance_days=trading_days)
-
-market_return_index = market_return.index
-leveraged_return_index = leveraged_returns.index
-market_filter = market_return_index.isin(leveraged_return_index)
-trunc_market_return = market_return[market_filter]
-
-initial_start_date = leveraged_return_index[0]
-spy_close_index = spy_close.index.isin([initial_start_date])
-leveraged_spy_price = float(spy_close[spy_close_index].values[0])
-
-market_portfolio_df = calc_market_portfolio(market_return_df=trunc_market_return,
-                                            date_index=leveraged_etf_close.index,
-                                            initial_investment=initial_investment,
-                                            initial_market_price=leveraged_spy_price)
-
-leveraged_portfolio_total_return = return_df(leveraged_portfolio_total_df)
-stat_values = [calc_asset_beta(leveraged_portfolio_total_return, trunc_market_return),
-         np.std(leveraged_portfolio_total_return),
-         np.std(trunc_market_return)]
-
-stats_df = pd.DataFrame(stat_values).transpose()
-stats_df.columns = ['2X Beta', '2X StdDev', 'Market StdDev']
-
-print("2X portfolio beta and standard deviation of the daily return")
-print(tabulate(stats_df, headers=['', *stats_df.columns], tablefmt='fancy_grid'))
-
-def adjust_time_series(return_df: pd.DataFrame, rf_values: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    ret_index = pd.to_datetime(return_df.index)
-    rf_index = pd.to_datetime(rf_values.index)
+def adjust_time_series(ts_one_df: pd.DataFrame, ts_two_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Adjust two DataFrame time series with overlapping date indices so that they
+    are the same length with the same date indices.
+    """
+    ts_one_index = pd.to_datetime(ts_one_df.index)
+    ts_two_index = pd.to_datetime(ts_two_df.index)
         # filter the close prices
-    matching_dates = ret_index.isin( rf_index )
-    ret_adj = return_df[matching_dates]
+    matching_dates = ts_one_index.isin( ts_two_index )
+    ts_one_adj = ts_one_df[matching_dates]
     # filter the rf_prices
-    ret_index = pd.to_datetime(ret_adj.index)
-    matching_dates = rf_index.isin(ret_index)
-    rf_prices_adj = rf_values[matching_dates]
-    return ret_adj, rf_prices_adj
+    ts_one_index = pd.to_datetime(ts_one_adj.index)
+    matching_dates = ts_two_index.isin(ts_one_index)
+    ts_two_adj = ts_two_df[matching_dates]
+    return ts_one_adj, ts_two_adj
 
 def excess_return_series(asset_return: pd.Series, risk_free: pd.Series) -> pd.DataFrame:
     excess_ret = asset_return.values.flatten() - risk_free.values.flatten()
@@ -586,10 +555,201 @@ sharpe_ratio_sixty_forty = calc_sharpe_ratio(ret_adj_df, rf_daily, trading_days)
 ret_adj_df, rf_daily = adjust_time_series(market_return, rf_daily_df)
 sharpe_ratio_market = calc_sharpe_ratio(ret_adj_df, rf_daily, trading_days)
 
-sixty_forty_sharpe = (np.mean(portfolio_sixty_forty_return) / np.std(portfolio_sixty_forty_return)) * np.sqrt(trading_days)
+sharpe_df = pd.concat([sharpe_ratio_sixty_forty, sharpe_ratio_market], axis=1)
 
-lib_sixty_forty_sharpe = qs.stats.sharpe(portfolio_sixty_forty_return)
-lib_spy_sharpe = qs.stats.sharpe(market_return)
+print("Sharpe Ratios")
+print(tabulate(sharpe_df, headers=['', '40/60 portfolio', 'SPY'], tablefmt='fancy_grid'))
+
+leveraged_etf_symbols = [ 'SSO', 'UBT', 'UST']
+leveraged_etf_weights = {"SSO": 0.40, "UBT": 0.44, "UST": 0.16 }
+leveraged_etf_weights_df: pd.DataFrame = pd.DataFrame( leveraged_etf_weights.values()).transpose()
+leveraged_etf_weights_df.columns = leveraged_etf_weights.keys()
+
+# Start dates on finance.yahoo.com are completely available on this date
+leveraged_etf_start_date_str = '2011-01-01'
+leveraged_start_date: datetime = datetime.fromisoformat(leveraged_etf_start_date_str)
+
+leveraged_etf_close_file = 'leveraged_etf_close'
+# Fetch the adjusted close price for the unleveraged "all weather" set of ETFs'
+# VTI, VGLT, VGIT, VPU and IAU
+leveraged_etf_close: pd.DataFrame = get_market_data(file_name=leveraged_etf_close_file,
+                                          data_col='Close',
+                                          symbols=leveraged_etf_symbols,
+                                          data_source=data_source,
+                                          start_date=leveraged_start_date,
+                                          end_date=end_date)
+
+leveraged_etf_adj_close_file = 'leveraged_etf_adj_close'
+# Fetch the adjusted close price for the unleveraged "all weather" set of ETFs'
+# VTI, VGLT, VGIT, VPU and IAU
+leveraged_etf_adj_close: pd.DataFrame = get_market_data(file_name=leveraged_etf_adj_close_file,
+                                          data_col="Adj Close",
+                                          symbols=leveraged_etf_symbols,
+                                          data_source=data_source,
+                                          start_date=leveraged_start_date,
+                                          end_date=end_date)
+
+leveraged_prices = leveraged_etf_close[0:1]
+leveraged_returns = return_df(leveraged_etf_adj_close)
+
+leveraged_holdings, shares = calc_portfolio_holdings(initial_investment=initial_investment,
+                                           weights=leveraged_etf_weights_df,
+                                           prices=leveraged_prices)
+
+leveraged_portfolio_df, leveraged_portfolio_total_df = calc_rebalanced_portfolio(holdings=leveraged_holdings,
+                                                             etf_close=leveraged_etf_close,
+                                                             returns=leveraged_returns,
+                                                             weights=leveraged_etf_weights_df,
+                                                             rebalance_days=trading_days)
+
+market_return_index = market_return.index
+leveraged_return_index = leveraged_returns.index
+market_filter = market_return_index.isin(leveraged_return_index)
+trunc_market_return = market_return[market_filter]
+
+initial_start_date = leveraged_return_index[0]
+spy_close_index = spy_close.index.isin([initial_start_date])
+leveraged_spy_price = float(spy_close[spy_close_index].values[0])
+
+market_portfolio_df = calc_market_portfolio(market_return_df=trunc_market_return,
+                                            date_index=leveraged_etf_close.index,
+                                            initial_investment=initial_investment,
+                                            initial_market_price=leveraged_spy_price)
+
+leveraged_portfolio_plus_spy = pd.concat([leveraged_portfolio_total_df, market_portfolio_df], axis=1)
+# leveraged_portfolio_plus_spy.plot(title="40/60 stock/bond, 2X leverage + SPY", grid=True, figsize=(10,8))
+
+leveraged_portfolio_total_return = return_df(leveraged_portfolio_total_df)
+stat_values = [calc_asset_beta(leveraged_portfolio_total_return, trunc_market_return),
+         np.std(leveraged_portfolio_total_return),
+         np.std(trunc_market_return)]
+
+stats_df = pd.DataFrame(stat_values).transpose()
+stats_df.columns = ['2X Beta', '2X StdDev', 'Market StdDev']
+
+print("2X portfolio beta and standard deviation of the daily return")
+print(tabulate(stats_df, headers=['', *stats_df.columns], tablefmt='fancy_grid'))
+
+
+annual_ret_df = period_return(leveraged_portfolio_total_df, trading_days)
+# plot_return(annual_ret_df, '2X Portfolio Annual Return')
+
+mean_return_df = pd.DataFrame(annual_ret_df.mean(axis=0))
+print(tabulate(mean_return_df, headers=['', 'Mean Annual Return'], tablefmt='fancy_grid'))
+
+dividend_symbols = ['PHK', 'RCS', 'PTY', 'PMF', 'SCHP']
+# the Schwab TIPS fund was started in August 2010
+div_start_date_str = start_date_str = '2011-01-01'
+div_start_date: datetime = datetime.fromisoformat(div_start_date_str)
+# end date is the previously defined end_date
+dividend_adj_close_file = "dividend_adj_close"
+
+dividend_adj_close = get_market_data(file_name=dividend_adj_close_file,
+                                     symbols=dividend_symbols,
+                                     data_col='Adj Close',
+                                     data_source=data_source,
+                                     start_date=div_start_date,
+                                     end_date=end_date)
+
+dividend_returns = return_df(dividend_adj_close)
+
+
+def calc_asset_value(initial_value: int, returns: pd.DataFrame) -> pd.DataFrame:
+    length = returns.shape[0] + 1
+    portfolio_value_np: np.array = np.zeros(length)
+    portfolio_value_np[0] = initial_value
+    for t in range(1, length):
+        portfolio_value_np[t] = portfolio_value_np[t-1] + (portfolio_value_np[t-1] * returns[t-1])
+    return pd.DataFrame(portfolio_value_np)
+
+
+def calc_portfolio_value(initial_value: int, date_index: pd.Index, asset_returns_df: pd.DataFrame) -> pd.DataFrame:
+    portfolio_df: pd.DataFrame = pd.DataFrame()
+    index = [start_date, asset_returns_df.index]
+    for col in asset_returns_df.columns:
+        returns = asset_returns_df[col]
+        asset_value = calc_asset_value(initial_value, returns)
+        asset_value.columns = [col]
+        asset_value.index = date_index
+        portfolio_df[col] = asset_value
+    return portfolio_df
+
+
+asset_returns_df = calc_portfolio_value(initial_value=initial_investment, date_index=dividend_adj_close.index, asset_returns_df=dividend_returns)
+
+# asset_returns_df.plot(title="PIMCO CEFs + SCHP", grid=True, figsize=(10,8))
+
+def calc_basket_beta(asset_returns_df: pd.DataFrame, market_return_df: pd.DataFrame) -> pd.DataFrame:
+    asset_beta_l: list = []
+    for col in asset_returns_df.columns:
+        asset_beta = calc_asset_beta(asset_returns_df[col], market_return_df)
+        asset_beta_l.append(asset_beta)
+    basket_beta_df: pd.DataFrame = pd.DataFrame(asset_beta_l).transpose()
+    basket_beta_df.columns = asset_returns_df.columns
+    return basket_beta_df
+
+def calc_basket_std(asset_returns_df: pd.DataFrame) -> pd.DataFrame:
+    asset_std: list = []
+    for col in asset_returns_df.columns:
+        asset_std.append( np.std(asset_returns_df[col]) )
+    basket_std: pd.DataFrame = pd.DataFrame(asset_std).transpose()
+    basket_std.columns = asset_returns_df.columns
+    return basket_std
+
+market_return_index = market_return.index
+dividend_return_index = dividend_returns.index
+market_filter = market_return_index.isin(dividend_return_index)
+
+trunc_market_return = market_return[market_filter]
+asset_beta_df = calc_basket_beta(dividend_returns, trunc_market_return)
+asset_beta_df.index = ['Beta']
+print(tabulate(asset_beta_df, headers=['', *asset_beta_df.columns], tablefmt='fancy_grid'))
+
+asset_std_df = calc_basket_std(dividend_returns)
+asset_std_df['Market'] = pd.DataFrame([ np.std(trunc_market_return)])
+asset_std_df.index = ['StdDev']
+print("Daily Return Standard Deviation")
+print(tabulate(asset_std_df, headers=['', *asset_std_df.columns], tablefmt='fancy_grid'))
+
+simple_port_symbols = [ 'VTI', 'SCHP']
+simple_port_weights = {"VTI": 0.40, "SCHP": 0.60 }
+simple_port_weights_df: pd.DataFrame = pd.DataFrame( simple_port_weights.values()).transpose()
+simple_port_weights_df.columns = simple_port_weights.keys()
+
+schp_returns = dividend_returns['SCHP']
+vti_returns = returns['VTI']
+
+vti_returns_adj, schp_returns_adj = adjust_time_series(schp_returns, vti_returns)
+vti_close = etf_close['VTI']
+
+schp_close_file = 'schp_close'
+schp_close = get_market_data(file_name=schp_close_file,
+                                data_col='Close',
+                                symbols=['SCHP'],
+                                data_source=data_source,
+                                start_date=div_start_date,
+                                end_date=end_date)
+
+vti_close_adj, schp_close_adj = adjust_time_series(vti_close, schp_close)
+
+simple_port_returns = pd.concat([vti_returns_adj, schp_returns_adj], axis=1)
+simple_port_close = pd.concat([vti_close_adj, schp_close_adj], axis=1)
+
+simple_port_prices = simple_port_close[0:1]
+
+simple_port_holdings, shares = calc_portfolio_holdings(initial_investment=initial_investment,
+                                           weights=simple_port_weights_df,
+                                           prices=simple_port_prices)
+
+simple_port_df, simple_port_total_df = calc_rebalanced_portfolio(holdings=simple_port_holdings,
+                                                             etf_close=simple_port_close,
+                                                             returns=simple_port_returns,
+                                                             weights=simple_port_weights_df,
+                                                             rebalance_days=trading_days)
+
+portfolios_df: pd.DataFrame = pd.concat([simple_port_total_df, portfolio_total_forty_sixty_df], axis=1)
+
+portfolios_df.plot(title="40/60 VTI/SCHP, 40/60 VTI,(VGLT, VGIT)", grid=True, figsize=(10,8))
 
 print("hi there")
 
