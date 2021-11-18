@@ -550,10 +550,10 @@ def calc_sharpe_ratio(asset_return: pd.DataFrame, risk_free: pd.Series, period: 
     return result_df
 
 
-ret_adj_df, rf_daily = adjust_time_series(portfolio_sixty_forty_return, rf_daily_df)
-sharpe_ratio_sixty_forty = calc_sharpe_ratio(ret_adj_df, rf_daily, trading_days)
-ret_adj_df, rf_daily = adjust_time_series(market_return, rf_daily_df)
-sharpe_ratio_market = calc_sharpe_ratio(ret_adj_df, rf_daily, trading_days)
+ret_adj_df, rf_daily_adj = adjust_time_series(portfolio_sixty_forty_return, rf_daily_df)
+sharpe_ratio_sixty_forty = calc_sharpe_ratio(ret_adj_df, rf_daily_adj, trading_days)
+ret_adj_df, rf_daily_adj = adjust_time_series(market_return, rf_daily_df)
+sharpe_ratio_market = calc_sharpe_ratio(ret_adj_df, rf_daily_adj, trading_days)
 
 sharpe_df = pd.concat([sharpe_ratio_sixty_forty, sharpe_ratio_market], axis=1)
 
@@ -711,17 +711,13 @@ asset_std_df.index = ['StdDev']
 print("Daily Return Standard Deviation")
 print(tabulate(asset_std_df, headers=['', *asset_std_df.columns], tablefmt='fancy_grid'))
 
-simple_port_symbols = [ 'VTI', 'SCHP']
+imple_port_symbols = [ 'VTI', 'SCHP']
 simple_port_weights = {"VTI": 0.40, "SCHP": 0.60 }
 simple_port_weights_df: pd.DataFrame = pd.DataFrame( simple_port_weights.values()).transpose()
 simple_port_weights_df.columns = simple_port_weights.keys()
 
-schp_returns = dividend_returns['SCHP']
-vti_returns = returns['VTI']
-
-vti_returns_adj, schp_returns_adj = adjust_time_series(schp_returns, vti_returns)
-vti_close = etf_close['VTI']
-
+# The SCHP adjusted close time series has been previously fetched. See dividend_adj_close.
+# The close prices has not been previously fetched.
 schp_close_file = 'schp_close'
 schp_close = get_market_data(file_name=schp_close_file,
                                 data_col='Close',
@@ -730,10 +726,32 @@ schp_close = get_market_data(file_name=schp_close_file,
                                 start_date=div_start_date,
                                 end_date=end_date)
 
-vti_close_adj, schp_close_adj = adjust_time_series(vti_close, schp_close)
+etf_close_forty_sixty = etf_close[forty_sixty_weights_df.columns]
+# Truncate the etf_close time series so that the match the schp_close time series
+etf_close_trunc: pd.DataFrame = pd.DataFrame()
+for col in etf_close_forty_sixty.columns:
+    ts_close_trunc, temp = adjust_time_series(etf_close_forty_sixty[col], schp_close)
+    etf_close_trunc[col] = ts_close_trunc
 
-simple_port_returns = pd.concat([vti_returns_adj, schp_returns_adj], axis=1)
-simple_port_close = pd.concat([vti_close_adj, schp_close_adj], axis=1)
+schp_returns = dividend_returns['SCHP']
+etf_returns_trunc: pd.DataFrame = pd.DataFrame()
+for col in forty_sixty_weights_df.columns:
+    ret_trunc, temp = adjust_time_series(returns[col], schp_returns)
+    etf_returns_trunc[col] = ret_trunc
+
+sixty_forty_trunc_close = etf_close_forty_sixty[0:1]
+sixty_forty_trunc_holdings, shares = calc_portfolio_holdings(initial_investment=initial_investment,
+                                                     weights=forty_sixty_weights_df,
+                                                     prices=sixty_forty_trunc_close)
+
+sixty_forty_port_trunc_df, sixty_forty_port_total_df = calc_rebalanced_portfolio(holdings=sixty_forty_trunc_holdings,
+                                                                                 etf_close=etf_close_trunc,
+                                                                                 returns=etf_returns_trunc,
+                                                                                 weights=forty_sixty_weights_df,
+                                                                                 rebalance_days=trading_days)
+
+simple_port_returns = pd.concat([etf_returns_trunc['VTI'], schp_returns], axis=1)
+simple_port_close = pd.concat([etf_close_trunc['VTI'], schp_close], axis=1)
 
 simple_port_prices = simple_port_close[0:1]
 
@@ -747,9 +765,26 @@ simple_port_df, simple_port_total_df = calc_rebalanced_portfolio(holdings=simple
                                                              weights=simple_port_weights_df,
                                                              rebalance_days=trading_days)
 
-portfolios_df: pd.DataFrame = pd.concat([simple_port_total_df, portfolio_total_forty_sixty_df], axis=1)
+portfolios_df: pd.DataFrame = pd.concat([simple_port_total_df, sixty_forty_port_total_df], axis=1)
 
+portfolios_df.columns = ['VTI/SCHP', 'VTI,(VGLT, VGIT)']
 portfolios_df.plot(title="40/60 VTI/SCHP, 40/60 VTI,(VGLT, VGIT)", grid=True, figsize=(10,8))
+
+portfolio_ret = return_df(portfolios_df)
+portfolio_ret_adj: pd.DataFrame = pd.DataFrame()
+rf_adj: pd.DataFrame = pd.DataFrame()
+for col in portfolio_ret.columns:
+    port_adj, rf_adj = adjust_time_series(portfolio_ret[col], rf_daily_df)
+    portfolio_ret_adj[col] = port_adj
+    
+port_sharpe_ratio = calc_sharpe_ratio(portfolio_ret_adj, pd.Series(rf_adj.values.flatten()), trading_days)
+
+port_vol = pd.DataFrame(list( portfolio_ret_adj.std())).transpose()
+port_vol.columns = portfolio_ret_adj.columns
+
+print(tabulate(port_vol, headers=['', *port_vol.columns], tablefmt='fancy_grid'))
+print(tabulate(port_sharpe_ratio, headers=['', *port_sharpe_ratio.columns], tablefmt='fancy_grid'))
+
 
 print("hi there")
 
