@@ -663,7 +663,14 @@ def calc_asset_value(initial_value: int, returns: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(portfolio_value_np)
 
 
-def calc_portfolio_value(initial_value: int, date_index: pd.Index, asset_returns_df: pd.DataFrame) -> pd.DataFrame:
+def calc_basket_value(initial_value: int, date_index: pd.Index, asset_returns_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculate the asset value for a basket of stocks.
+    :param initial_value:
+    :param date_index:
+    :param asset_returns_df:
+    :return:
+    """
     portfolio_df: pd.DataFrame = pd.DataFrame()
     index = [start_date, asset_returns_df.index]
     for col in asset_returns_df.columns:
@@ -675,7 +682,7 @@ def calc_portfolio_value(initial_value: int, date_index: pd.Index, asset_returns
     return portfolio_df
 
 
-asset_returns_df = calc_portfolio_value(initial_value=initial_investment, date_index=dividend_adj_close.index, asset_returns_df=dividend_returns)
+asset_returns_df = calc_basket_value(initial_value=initial_investment, date_index=dividend_adj_close.index, asset_returns_df=dividend_returns)
 
 # asset_returns_df.plot(title="PIMCO CEFs + SCHP", grid=True, figsize=(10,8))
 
@@ -711,7 +718,12 @@ asset_std_df.index = ['StdDev']
 print("Daily Return Standard Deviation")
 print(tabulate(asset_std_df, headers=['', *asset_std_df.columns], tablefmt='fancy_grid'))
 
-imple_port_symbols = [ 'VTI', 'SCHP']
+dividend_returns_adj, rf_adj = adjust_time_series(dividend_returns, rf_daily_df)
+pimco_asset_sharpe_ratio = calc_sharpe_ratio(dividend_returns_adj, pd.Series(rf_adj.values.flatten()), trading_days)
+print("Pimco fund Sharpe Ratios")
+print(tabulate(pimco_asset_sharpe_ratio, headers=['', *pimco_asset_sharpe_ratio.columns], tablefmt='fancy_grid'))
+
+simple_port_symbols = [ 'VTI', 'SCHP']
 simple_port_weights = {"VTI": 0.40, "SCHP": 0.60 }
 simple_port_weights_df: pd.DataFrame = pd.DataFrame( simple_port_weights.values()).transpose()
 simple_port_weights_df.columns = simple_port_weights.keys()
