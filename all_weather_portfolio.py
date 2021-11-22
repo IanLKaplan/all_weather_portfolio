@@ -1,14 +1,23 @@
 
 from datetime import datetime, timedelta
+
+import matplotlib
 from tabulate import tabulate
 from typing import List, Tuple
 from pandas_datareader import data
+import pypfopt as pyopt
+from pypfopt import expected_returns
+from pypfopt import risk_models
+from pypfopt import plotting, CLA
 import matplotlib.pyplot as plt
 import scipy.stats as stats
 import pandas as pd
 import numpy as np
 from pathlib import Path
 import tempfile
+import quantstats as qs
+
+
 
 plt.style.use('seaborn-whitegrid')
 
@@ -751,7 +760,7 @@ for col in forty_sixty_weights_df.columns:
     ret_trunc, temp = adjust_time_series(returns[col], schp_returns)
     etf_returns_trunc[col] = ret_trunc
 
-sixty_forty_trunc_close = etf_close_forty_sixty[0:1]
+sixty_forty_trunc_close = etf_close_trunc[0:1]
 sixty_forty_trunc_holdings, shares = calc_portfolio_holdings(initial_investment=initial_investment,
                                                      weights=forty_sixty_weights_df,
                                                      prices=sixty_forty_trunc_close)
@@ -783,6 +792,7 @@ portfolios_df.columns = ['VTI/SCHP', 'VTI,(VGLT, VGIT)']
 portfolios_df.plot(title="40/60 VTI/SCHP, 40/60 VTI,(VGLT, VGIT)", grid=True, figsize=(10,8))
 
 portfolio_ret = return_df(portfolios_df)
+
 portfolio_ret_adj: pd.DataFrame = pd.DataFrame()
 rf_adj: pd.DataFrame = pd.DataFrame()
 for col in portfolio_ret.columns:
@@ -797,8 +807,72 @@ port_vol.columns = portfolio_ret_adj.columns
 print(tabulate(port_vol, headers=['', *port_vol.columns], tablefmt='fancy_grid'))
 print(tabulate(port_sharpe_ratio, headers=['', *port_sharpe_ratio.columns], tablefmt='fancy_grid'))
 
+sixty_forty_port_ret = portfolio_ret[portfolio_ret.columns[0]]
+sixty_forty_port_ret.index = pd.to_datetime(portfolio_ret.index)
+# qs.plots.drawdown( sixty_forty_port_ret )
 
-print("hi there")
+# dividend_adj_close['SCHP'] contains the adjusted close prices for SCHP from it's inception.
+# etf_adj_close['VTI'] contains the VTI adjusted close prices. This is a longer period that dividend_adj_close so the
+# period must be adjusted so that it is the same.
+
+vti_adj_close = etf_adj_close['VTI']
+schp_adj_close = dividend_adj_close['SCHP']
+vti_adj_close, schp_adj_close = adjust_time_series(vti_adj_close, schp_adj_close)
+sixty_forty_adj_close = pd.concat([vti_adj_close, schp_adj_close], axis=1)
+
+def calc_mv_opt_weights(adj_close: pd.DataFrame, default_df:pd.DataFrame) -> pd.DataFrame:
+    mu = expected_returns.capm_return(adj_close)
+    if all(mu > 0):
+        S = risk_models.CovarianceShrinkage(adj_close).ledoit_wolf()
+        ef = pyopt.EfficientFrontier(mu, S)
+        ef.max_sharpe()
+        opt_weights = ef.clean_weights()
+        opt_weights_df: pd.DataFrame = pd.DataFrame( opt_weights.values()).transpose()
+        opt_weights_df.columns = opt_weights.keys()
+    else:
+        opt_weights_df = default_df
+    return opt_weights_df
+
+
+ix_l = list(ix for ix in range((sixty_forty_adj_close.shape[0]-1), -1, -trading_days))
+ix_l.reverse()
+if ix_l[0] > 0:
+    ix_l[0] = 0
+
+vti_schp_weights = pd.DataFrame()
+for i in range(1, len(ix_l)):
+    start_ix = ix_l[i-1]
+    end_ix = ix_l[i]
+    sec = sixty_forty_adj_close[start_ix:end_ix]
+    opt_weights_df = round(calc_mv_opt_weights(sec, simple_port_weights_df), 2)
+    opt_weights_df.index = [sixty_forty_adj_close.index[end_ix]]
+    vti_schp_weights = vti_schp_weights.append(opt_weights_df)
+
+print(tabulate(vti_schp_weights, headers=['', *vti_schp_weights.columns], tablefmt='fancy_grid'))
+
+assets_np = np.zeros(sixty_forty_adj_close.shape)
+total_np = np.zeros(sixty_forty_adj_close.shape[0])
+total_np[0] = initial_investment
+for i in range(1, len(ix_l)):
+    start_ix = ix_l[i-1]
+    end_ix = ix_l[i]
+    sec = sixty_forty_adj_close[start_ix:end_ix]
+    opt_weights_df = calc_mv_opt_weights(sec, simple_port_weights_df)
+    opt_weights_df.index = [sixty_forty_adj_close.index[end_ix]]
+    sec_ret = return_df(sec)
+    initial_investment_t = total_np[start_ix]
+    holdings_t, shares = calc_portfolio_holdings(initial_investment=initial_investment_t,
+                                                 weights=opt_weights_df,
+                                                 prices=simple_port_close[start_ix:(start_ix+1)])
+    assets_np[start_ix,] = holdings_t
+    total_np[start_ix] = holdings_t.sum(axis=1)
+    for t in range(start_ix+1, end_ix):
+        for col, stock in enumerate(holdings_t.columns):
+            assets_np[t, col] = assets_np[t - 1, col] + (assets_np[t - 1, col] * sec_ret[stock][t - 1])
+            total_np[t] = total_np[t] + np[t, col]
+
+
+print("Hi there")
 
 def main():
     print("Hello World!")
