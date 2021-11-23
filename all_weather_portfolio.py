@@ -754,8 +754,11 @@ for col in etf_close_forty_sixty.columns:
     ts_close_trunc, temp = adjust_time_series(etf_close_forty_sixty[col], schp_close)
     etf_close_trunc[col] = ts_close_trunc
 
+# dividend_returns contains the returns for the PIMCO funds plus SCHP
 schp_returns = dividend_returns['SCHP']
 etf_returns_trunc: pd.DataFrame = pd.DataFrame()
+# forty_sixty_weights_df has weights for VTI, VGLT and VGIT
+# etf_returns_trunc will be the returns for VTI, VGLT and VGIT truncated to match the schp_returns time period
 for col in forty_sixty_weights_df.columns:
     ret_trunc, temp = adjust_time_series(returns[col], schp_returns)
     etf_returns_trunc[col] = ret_trunc
@@ -793,11 +796,23 @@ portfolios_df.plot(title="40/60 VTI/SCHP, 40/60 VTI,(VGLT, VGIT)", grid=True, fi
 
 portfolio_ret = return_df(portfolios_df)
 
+"""
 portfolio_ret_adj: pd.DataFrame = pd.DataFrame()
 rf_adj: pd.DataFrame = pd.DataFrame()
 for col in portfolio_ret.columns:
     port_adj, rf_adj = adjust_time_series(portfolio_ret[col], rf_daily_df)
     portfolio_ret_adj[col] = port_adj
+"""
+
+def portfolio_adj_timeseries(portfolio_df: pd.DataFrame, time_series_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    portfolio_adj: pd.DataFrame = pd.DataFrame()
+    ts_adj: pd.DataFrame = pd.DataFrame()
+    for col in portfolio_df.columns:
+        port_adj, ts_adj = adjust_time_series(portfolio_df[col], time_series_df)
+        portfolio_adj[col] = port_adj
+    return portfolio_adj, ts_adj
+
+portfolio_ret_adj, rf_adj = portfolio_adj_timeseries(portfolio_ret, rf_daily_df)
     
 port_sharpe_ratio = calc_sharpe_ratio(portfolio_ret_adj, pd.Series(rf_adj.values.flatten()), trading_days)
 
@@ -850,27 +865,74 @@ for i in range(1, len(ix_l)):
 
 print(tabulate(vti_schp_weights, headers=['', *vti_schp_weights.columns], tablefmt='fancy_grid'))
 
-assets_np = np.zeros(sixty_forty_adj_close.shape)
-total_np = np.zeros(sixty_forty_adj_close.shape[0])
-total_np[0] = initial_investment
-for i in range(1, len(ix_l)):
-    start_ix = ix_l[i-1]
-    end_ix = ix_l[i]
-    sec = sixty_forty_adj_close[start_ix:end_ix]
-    opt_weights_df = calc_mv_opt_weights(sec, simple_port_weights_df)
-    opt_weights_df.index = [sixty_forty_adj_close.index[end_ix]]
-    sec_ret = return_df(sec)
-    initial_investment_t = total_np[start_ix]
-    holdings_t, shares = calc_portfolio_holdings(initial_investment=initial_investment_t,
-                                                 weights=opt_weights_df,
-                                                 prices=simple_port_close[start_ix:(start_ix+1)])
-    assets_np[start_ix,] = holdings_t
-    total_np[start_ix] = holdings_t.sum(axis=1)
-    for t in range(start_ix+1, end_ix):
-        for col, stock in enumerate(holdings_t.columns):
-            assets_np[t, col] = assets_np[t - 1, col] + (assets_np[t - 1, col] * sec_ret[stock][t - 1])
-            total_np[t] = total_np[t] + np[t, col]
+opt_port_weights_df = round(calc_mv_opt_weights(sixty_forty_adj_close, simple_port_weights_df), 2)
+print(tabulate(opt_port_weights_df, headers=['', *opt_port_weights_df.columns], tablefmt='fancy_grid'))
 
+opt_port_holdings, shares = calc_portfolio_holdings(initial_investment=initial_investment,
+                                           weights=opt_port_weights_df,
+                                           prices=simple_port_prices)
+
+opt_port_df, opt_port_total_df = calc_rebalanced_portfolio(holdings=opt_port_holdings,
+                                                             etf_close=simple_port_close,
+                                                             returns=simple_port_returns,
+                                                             weights=opt_port_weights_df,
+                                                             rebalance_days=trading_days)
+
+portfolios_df: pd.DataFrame = pd.concat([simple_port_total_df, opt_port_total_df], axis=1)
+portfolios_df.columns = ['60/40 VTI/SCHP', 'Optimized VTI/SCHP']
+
+# portfolios_df.plot(title="40/60 VTI/SCHP, Optimized VTI/SCHP", grid=True, figsize=(10,8))
+
+opt_portfolio_ret = return_df(portfolios_df)
+opt_portfolio_ret_adj, rf_adj = portfolio_adj_timeseries(opt_portfolio_ret, rf_daily_df)
+
+opt_port_sharpe_ratio = calc_sharpe_ratio(opt_portfolio_ret_adj, pd.Series(rf_adj.values.flatten()), trading_days)
+
+print('Sharpe Ratio')
+print(tabulate(opt_port_sharpe_ratio, headers=['', *opt_port_sharpe_ratio.columns], tablefmt='fancy_grid'))
+
+bhk_close_file = 'bhk_close'
+bhk_close = get_market_data(file_name=bhk_close_file,
+                                data_col='Close',
+                                symbols=['BHK'],
+                                data_source=data_source,
+                                start_date=div_start_date,
+                                end_date=end_date)
+
+bhk_adj_close_file = 'bhk_adj_close'
+bhk_adj_close = get_market_data(file_name=bhk_adj_close_file,
+                                data_col='Adj Close',
+                                symbols=['BHK'],
+                                data_source=data_source,
+                                start_date=div_start_date,
+                                end_date=end_date)
+
+
+bhk_adj_close.plot(title="BHK Ajusted Close Price", grid=True, figsize=(10,8))
+
+bhk_port_adj_close = pd.concat([sixty_forty_adj_close, bhk_adj_close], axis=1)
+bhk_port_close = pd.concat([simple_port_close, bhk_close], axis=1)
+bhk_port_prices = bhk_port_close[0:1]
+
+bhk_port_weights_df = round(calc_mv_opt_weights(bhk_port_adj_close, simple_port_weights_df), 2)
+
+print(tabulate(bhk_port_weights_df, headers=['', *bhk_port_weights_df.columns], tablefmt='fancy_grid'))
+
+bhk_port_holdings, shares = calc_portfolio_holdings(initial_investment=initial_investment,
+                                           weights=bhk_port_weights_df,
+                                           prices=bhk_port_prices)
+
+bhk_port_returns = return_df(bhk_port_adj_close)
+bhk_port_df, bhk_port_total_df = calc_rebalanced_portfolio(holdings=bhk_port_holdings,
+                                                             etf_close=bhk_port_close,
+                                                             returns=bhk_port_returns,
+                                                             weights=bhk_port_weights_df,
+                                                             rebalance_days=trading_days)
+
+portfolios_df: pd.DataFrame = pd.concat([simple_port_total_df, bhk_port_total_df], axis=1)
+portfolios_df.columns = ['40/60 VTI/SCHP', 'Optimized VTI/SCHP/BHK']
+
+portfolios_df.plot(title="40/60 VTI/SCHP, Optimized VTI/SCHP/BHK", grid=True, figsize=(10,8))
 
 print("Hi there")
 
