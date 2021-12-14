@@ -4,6 +4,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
 import tempfile
 from pathlib import Path
 from pandas_datareader import data
@@ -136,13 +137,54 @@ def get_asset_yearly_ret(symbol: str) -> pd.Series:
 symbols = ['FMG.AX', 'BHP', 'RIO', 'CEQP', 'ARCC', 'EVV', 'PTY',
            'NUSI', 'SUN.AX', 'WBK', 'WMB', 'XOM', 'WPC']
 
+expense = {'FMG.AX': 0, 'BHP': 0, 'RIO': 0, 'CEQP': 0, 'ARCC': 0,
+           'EVV': 0.0191, 'PTY': 0.0109, 'NUSI': 0.0068, 'SUN.AX': 0,
+           'WBK': 0, 'WMB': 0, 'XOM': 0, 'WPC': 0, 'BHK': 0.0092}
 
+dividend_dict: dict = dict()
 for sym in symbols:
     yearly_ret = get_asset_yearly_ret(sym)
-    if len(yearly_ret) > 0:
-        title = f'{sym} Dividend Yield'
-        (yearly_ret * 100).plot(grid=True, figsize=(10,6), ylabel="Percent", title=title, kind='bar')
-        plt.show()
+    dividend_dict[sym] = yearly_ret
 
+dividend_dict_adj = dict()
+for sym in symbols:
+    dividend_dict_adj[sym] = dividend_dict[sym] - expense[sym]
+
+
+def plot_bar(subplot, symbol, data, width) -> None:
+    title = f'{symbol} Yearly Dividend Yield'
+    subplot.set_ylabel('Percent')
+    subplot.set_title(title)
+    subplot.bar(data.index, data.values, width=width, color='blue')
+
+
+trading_days = 253
+num_assets = len(dividend_dict_adj)
+keys = list(dividend_dict_adj)
+i = 0
+while i < num_assets - (num_assets % 2):
+    fig = plt.figure(figsize=(10, 6))
+    ax1 = fig.add_subplot(1, 2, 1)
+    ax2 = fig.add_subplot(1, 2, 2)
+    sym1 = keys[i]
+    sym2 = keys[1+1]
+    data1 = dividend_dict_adj[sym1] * 100
+    data2 = dividend_dict_adj[sym2] * 100
+    plot_bar(ax1, sym1, data1, trading_days)
+    plot_bar(ax2, sym2, data2, trading_days)
+    plt.show()
+    i = i + 2
+
+if num_assets % 2 > 0:
+    i = num_assets - 1
+    fig = plt.figure(figsize=(8, 6))
+    ax = fig.add_subplot(1, 1, 1)
+    sym = keys[i]
+    data = dividend_dict_adj[sym] * 100
+    plot_bar(ax, sym, data, trading_days)
+    plt.show()
+
+# title = f'{sym} Dividend Yield'
+# (yearly_ret * 100).plot(grid=True, figsize=(10,6), ylabel="Percent", title=title, kind='bar')
 
 print("hi there")
