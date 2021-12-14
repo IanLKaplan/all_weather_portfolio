@@ -2,9 +2,8 @@
 
 import yfinance as yf
 import pandas as pd
-import numpy as np
+from tabulate import tabulate
 import matplotlib.pyplot as plt
-import seaborn as sns
 import tempfile
 from pathlib import Path
 from pandas_datareader import data
@@ -184,7 +183,44 @@ if num_assets % 2 > 0:
     plot_bar(ax, sym, data, trading_days)
     plt.show()
 
-# title = f'{sym} Dividend Yield'
-# (yearly_ret * 100).plot(grid=True, figsize=(10,6), ylabel="Percent", title=title, kind='bar')
+mean_return = dict()
+for sym in list(dividend_dict_adj):
+    m = dividend_dict_adj[sym].mean()
+    mean_return[sym] = m
+
+percent_sum = sum(list(mean_return.values()))
+portfolio_percent = dict()
+for sym in list(mean_return):
+    percent = round(mean_return[sym] / percent_sum, 4)
+    portfolio_percent[sym] = percent
+
+portfolio_percent_df = pd.DataFrame( list(portfolio_percent.values()) )
+portfolio_percent_df.index = list(portfolio_percent.keys())
+
+print("Portfolio Percentage")
+print(tabulate(portfolio_percent_df * 100, headers=['Symbol', 'Portfolio Percent'], tablefmt='fancy_grid'))
+
+capital = 220000
+allocation_df = portfolio_percent_df * capital
+print(tabulate(allocation_df, headers=['Symbol', 'Dollar Allocation'], tablefmt='fancy_grid'))
+
+prices = yf.download(symbols, period='1d', interval='1d')
+prices_low = prices['Low']
+prices_high = prices['High']
+prices_mid = round((prices_low + prices_high) / 2, 2)
+allocation_df_t = allocation_df.transpose()
+shares_df = pd.DataFrame()
+for sym in allocation_df_t.columns:
+    shares_df[sym] = (allocation_df_t[sym].values // prices_mid[sym].values).flatten()
+
+print(tabulate(shares_df.transpose(), headers=['Symbol', 'Number of Shares'], tablefmt='fancy_grid'))
+
+invested_total = 0
+for sym in shares_df.columns:
+    asset_val = shares_df[sym].values * prices_mid[sym]
+    invested_total = invested_total + asset_val
+
+invested_total_df = pd.DataFrame(invested_total)
+print(tabulate(invested_total_df, headers=['', 'Total Invested'], tablefmt='fancy_grid'))
 
 print("hi there")
