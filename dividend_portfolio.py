@@ -166,7 +166,7 @@ while i < num_assets - (num_assets % 2):
     ax1 = fig.add_subplot(1, 2, 1)
     ax2 = fig.add_subplot(1, 2, 2)
     sym1 = keys[i]
-    sym2 = keys[1+1]
+    sym2 = keys[i+1]
     data1 = dividend_dict_adj[sym1] * 100
     data2 = dividend_dict_adj[sym2] * 100
     plot_bar(ax1, sym1, data1, trading_days)
@@ -204,10 +204,17 @@ capital = 220000
 allocation_df = portfolio_percent_df * capital
 print(tabulate(allocation_df, headers=['Symbol', 'Dollar Allocation'], tablefmt='fancy_grid'))
 
+print("Fetching current stock prices...")
 prices = yf.download(symbols, period='1d', interval='1d')
+print()
+
 prices_low = prices['Low']
 prices_high = prices['High']
 prices_mid = round((prices_low + prices_high) / 2, 2)
+
+print(f"Share prices as of {prices_mid.index[0]}")
+print(tabulate(prices_mid.transpose(), headers=['Symbol', 'Share Price'], tablefmt='fancy_grid'))
+
 allocation_df_t = allocation_df.transpose()
 shares_df = pd.DataFrame()
 for sym in allocation_df_t.columns:
