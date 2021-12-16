@@ -134,7 +134,7 @@ def get_asset_yearly_ret(symbol: str) -> pd.Series:
     return yearly_ret
 
 symbols = ['FMG.AX', 'BHP', 'RIO', 'CEQP', 'ARCC', 'EVV', 'PTY',
-           'NUSI', 'SUN.AX', 'WBK', 'WMB', 'XOM', 'WPC']
+           'NUSI', 'SUN.AX', 'WBK', 'WMB', 'XOM', 'WPC', 'BHK']
 
 expense = {'FMG.AX': 0, 'BHP': 0, 'RIO': 0, 'CEQP': 0, 'ARCC': 0,
            'EVV': 0.0191, 'PTY': 0.0109, 'NUSI': 0.0068, 'SUN.AX': 0,
@@ -229,5 +229,15 @@ for sym in shares_df.columns:
 
 invested_total_df = pd.DataFrame(invested_total)
 print(tabulate(invested_total_df, headers=['', 'Total Invested'], tablefmt='fancy_grid'))
+
+portfolio_return_df = pd.DataFrame()
+portfolio_percent_df_t = portfolio_percent_df.transpose()
+for sym in portfolio_percent_df.index:
+    adj_return = mean_return[sym] * portfolio_percent_df_t[sym]
+    portfolio_return_df[sym] = adj_return
+
+total_return = round(portfolio_return_df.values.sum(), 4) * 100
+total_return_df = pd.DataFrame([total_return])
+print(tabulate(total_return_df, headers=['', 'Estimated Dividend Return'], tablefmt='fancy_grid'))
 
 print("hi there")
