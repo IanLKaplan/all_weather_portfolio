@@ -9,6 +9,7 @@ from pathlib import Path
 from pandas_datareader import data
 from typing import List
 from datetime import datetime
+from forex_python.converter import CurrencyRates
 
 
 def get_dividend_data(symbol: str, file_name:str) -> pd.Series:
@@ -140,6 +141,13 @@ expense = {'FMG.AX': 0, 'BHP': 0, 'RIO': 0, 'CEQP': 0, 'ARCC': 0,
            'EVV': 0.0191, 'PTY': 0.0109, 'NUSI': 0.0068, 'SUN.AX': 0,
            'WBK': 0, 'WMB': 0, 'XOM': 0, 'WPC': 0, 'BHK': 0.0092}
 
+c = CurrencyRates()
+aux_to_dollar = c.get_rate('AUD', 'USD')
+
+exchange_adj = {'FMG.AX': aux_to_dollar, 'BHP': 1, 'RIO': 1, 'CEQP': 1, 'ARCC': 1,
+                'EVV': 1, 'PTY': 1, 'NUSI': 1, 'SUN.AX': aux_to_dollar,
+                 'WBK': 1, 'WMB': 1, 'XOM': 1, 'WPC': 1, 'BHK': 1}
+
 dividend_dict: dict = dict()
 for sym in symbols:
     yearly_ret = get_asset_yearly_ret(sym)
@@ -212,19 +220,23 @@ prices_low = prices['Low']
 prices_high = prices['High']
 prices_mid = round((prices_low + prices_high) / 2, 2)
 
-print(f"Share prices as of {prices_mid.index[0]}")
-print(tabulate(prices_mid.transpose(), headers=['Symbol', 'Share Price'], tablefmt='fancy_grid'))
+prices_mid_adj = pd.DataFrame()
+for sym in prices_mid.columns:
+    prices_mid_adj[sym] = prices_mid[sym] * exchange_adj[sym]
+
+print(f"Share prices as of {prices_mid_adj.index[0]}")
+print(tabulate(prices_mid_adj.transpose(), headers=['Symbol', 'Share Price'], tablefmt='fancy_grid'))
 
 allocation_df_t = allocation_df.transpose()
 shares_df = pd.DataFrame()
 for sym in allocation_df_t.columns:
-    shares_df[sym] = (allocation_df_t[sym].values // prices_mid[sym].values).flatten()
+    shares_df[sym] = (allocation_df_t[sym].values // prices_mid_adj[sym].values).flatten()
 
 print(tabulate(shares_df.transpose(), headers=['Symbol', 'Number of Shares'], tablefmt='fancy_grid'))
 
 invested_total = 0
 for sym in shares_df.columns:
-    asset_val = shares_df[sym].values * prices_mid[sym]
+    asset_val = shares_df[sym].values * prices_mid_adj[sym]
     invested_total = invested_total + asset_val
 
 invested_total_df = pd.DataFrame(invested_total)
