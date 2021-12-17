@@ -94,7 +94,7 @@ def get_dividend_return(symbol: str, dividends: pd.Series) -> pd.Series:
         dividend_close = close_values[close_ix]
         dividend_ix = div_date_series.isin(close_date_series)
         dividends_adj = dividends[dividend_ix]
-        percent = (dividends_adj.values / dividend_close.values).flatten().round(2)
+        percent = (dividends_adj.values / dividend_close.values).flatten().round(5)
         percent_series = pd.Series(percent)
         dividends_adj_index = dividends_adj.index
         percent_series.index = dividends_adj_index
