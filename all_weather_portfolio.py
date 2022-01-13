@@ -59,6 +59,7 @@ def get_market_data(file_name: str,
         panel_data: pd.DataFrame = data.DataReader(symbols, data_source, start_date, end_date)
         close_data: pd.DataFrame = panel_data[data_col]
         close_data.to_csv(file_path)
+    assert len(close_data) > 0, f'Error reading data for {symbols}'
     return close_data
 
 
